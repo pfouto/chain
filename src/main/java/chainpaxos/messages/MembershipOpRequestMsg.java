@@ -1,8 +1,8 @@
 package chainpaxos.messages;
 
 import babel.generic.ProtoMessage;
-import chainpaxos.values.MembershipOp;
-import chainpaxos.values.PaxosValue;
+import common.values.MembershipOp;
+import common.values.PaxosValue;
 import io.netty.buffer.ByteBuf;
 import network.ISerializer;
 

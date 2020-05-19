@@ -1,4 +1,4 @@
-package common.utils;
+package frontend.utils;
 
 import babel.events.*;
 

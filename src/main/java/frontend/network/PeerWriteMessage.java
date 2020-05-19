@@ -1,7 +1,7 @@
 package frontend.network;
 
 import babel.generic.ProtoMessage;
-import common.WriteBatch;
+import frontend.ops.WriteBatch;
 import io.netty.buffer.ByteBuf;
 import network.ISerializer;
 

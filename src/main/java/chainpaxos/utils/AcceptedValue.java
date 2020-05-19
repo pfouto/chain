@@ -1,6 +1,6 @@
 package chainpaxos.utils;
 
-import chainpaxos.values.PaxosValue;
+import common.values.PaxosValue;
 import io.netty.buffer.ByteBuf;
 
 import java.io.IOException;

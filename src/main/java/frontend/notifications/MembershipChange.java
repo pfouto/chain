@@ -1,4 +1,4 @@
-package common.notifications;
+package frontend.notifications;
 
 import babel.generic.ProtoNotification;
 

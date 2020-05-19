@@ -1,6 +1,6 @@
-package chainpaxos.values;
+package common.values;
 
-import common.WriteBatch;
+import frontend.ops.WriteBatch;
 import io.netty.buffer.ByteBuf;
 
 import java.io.IOException;

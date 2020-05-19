@@ -10,13 +10,13 @@ import chainpaxos.utils.AcceptedValue;
 import chainpaxos.utils.InstanceState;
 import chainpaxos.utils.Membership;
 import chainpaxos.utils.SeqN;
-import chainpaxos.values.AppOpBatch;
-import chainpaxos.values.MembershipOp;
-import chainpaxos.values.NoOpValue;
-import chainpaxos.values.PaxosValue;
+import common.values.AppOpBatch;
+import common.values.MembershipOp;
+import common.values.NoOpValue;
+import common.values.PaxosValue;
 import channel.tcp.MultithreadedTCPChannel;
 import channel.tcp.events.*;
-import common.notifications.*;
+import frontend.notifications.*;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
 import org.apache.commons.lang3.tuple.MutablePair;
@@ -156,16 +156,18 @@ public class ChainPaxosProto extends GenericProtocol {
         registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, DecidedMsg.MSG_CODE, this::uponDecidedMsg, this::uponMessageFailed);
-        registerMessageHandler(peerChannel, JoinRequestMsg.MSG_CODE, this::uponJoinRequestMsg, this::uponMessageFailed);
-        registerMessageHandler(peerChannel, JoinSuccessMsg.MSG_CODE, this::uponJoinSuccessMsg, this::uponMessageFailed);
-        registerMessageHandler(peerChannel, MembershipOpRequestMsg.MSG_CODE, this::uponMembershipOpRequestMsg,
-                this::uponMessageFailed);
+        registerMessageHandler(peerChannel, JoinRequestMsg.MSG_CODE,
+                this::uponJoinRequestMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, JoinSuccessMsg.MSG_CODE,
+                this::uponJoinSuccessMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, MembershipOpRequestMsg.MSG_CODE,
+                this::uponMembershipOpRequestMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, PrepareMsg.MSG_CODE, this::uponPrepareMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, PrepareOkMsg.MSG_CODE, this::uponPrepareOkMsg, this::uponMessageFailed);
-        registerMessageHandler(peerChannel, StateRequestMsg.MSG_CODE, this::uponStateRequestMsg,
-                this::uponMessageFailed);
-        registerMessageHandler(peerChannel, StateTransferMsg.MSG_CODE, this::uponStateTransferMsg,
-                this::uponMessageFailed);
+        registerMessageHandler(peerChannel, StateRequestMsg.MSG_CODE,
+                this::uponStateRequestMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, StateTransferMsg.MSG_CODE,
+                this::uponStateTransferMsg, this::uponMessageFailed);
         registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
         registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::uponOutConnectionDown);
@@ -192,7 +194,6 @@ public class ChainPaxosProto extends GenericProtocol {
         }
 
         logger.info("Starting ChainPaxos: " + membership + " , qs " + QUORUM_SIZE);
-
     }
 
     private void setupInitialState(List<Host> members, int instanceNumber) {
@@ -634,8 +635,8 @@ public class ChainPaxosProto extends GenericProtocol {
         } else
             nextValue = new NoOpValue();
 
-        this.deliverMessageIn(new MessageInEvent(new AcceptMsg(instance.iN, currentSN.getValue(), (short) 0, nextValue,
-                highestAcknowledgedInstance), self, peerChannel));
+        this.deliverMessageIn(new MessageInEvent(new AcceptMsg(instance.iN, currentSN.getValue(),
+                (short) 0, nextValue, highestAcknowledgedInstance), self, peerChannel));
 
         lastAcceptSent = instance.iN;
         lastAcceptTime = System.currentTimeMillis();
@@ -653,8 +654,7 @@ public class ChainPaxosProto extends GenericProtocol {
             if (event.getNode().equals(nextOk))
                 for (int i = highestAcceptedInstance; i <= highestAcknowledgedInstance && i>=0; i++)
                     forward(instances.get(i));
-        } else
-            closeConnection(event.getNode());
+        }
     }
 
     private void uponOutConnectionDown(OutConnectionDown event, int channel) {
@@ -720,10 +720,16 @@ public class ChainPaxosProto extends GenericProtocol {
         if (o.opType == MembershipOp.OpType.REMOVE) {
             logger.info("Removed from membership: " + target + " in inst " + instance.iN);
             membership.removeMember(target);
+            triggerNotification(new MembershipChange(
+                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+                    self.getAddress(), supportedLeader().getAddress(), null));
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
             membership.addMember(target, o.position);
+            triggerNotification(new MembershipChange(
+                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+                    self.getAddress(), supportedLeader().getAddress(), null));
             nextOk = membership.nextLivingInChain(self);
             openConnection(target);
 

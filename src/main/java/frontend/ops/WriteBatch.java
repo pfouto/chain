@@ -1,4 +1,4 @@
-package common;
+package frontend.ops;
 
 import io.netty.buffer.ByteBuf;
 import network.ISerializer;
@@ -6,7 +6,6 @@ import network.ISerializer;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 

@@ -6,6 +6,7 @@ import babel.exceptions.InvalidParameterException;
 import babel.exceptions.ProtocolAlreadyExistsException;
 import babel.generic.GenericProtocol;
 import chainpaxos.ChainPaxosProto;
+import chainreplication.ChainReplicationProto;
 import frontend.FrontendProto;
 import io.netty.channel.EventLoopGroup;
 import network.NetworkManager;
@@ -49,6 +50,8 @@ public class Main {
         GenericProtocol consensusProto;
         if(alg.equals("chain"))
             consensusProto = new ChainPaxosProto(configProps, workerGroup);
+        else if(alg.equals("rep"))
+            consensusProto = new ChainReplicationProto(configProps, workerGroup);
         else {
             logger.error("Unknown algorithm: " + alg);
             return;

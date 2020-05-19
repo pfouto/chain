@@ -1,4 +1,4 @@
-package chainpaxos.values;
+package common.values;
 
 import io.netty.buffer.ByteBuf;
 

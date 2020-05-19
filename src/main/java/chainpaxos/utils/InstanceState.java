@@ -1,7 +1,7 @@
 package chainpaxos.utils;
 
 
-import chainpaxos.values.PaxosValue;
+import common.values.PaxosValue;
 import network.data.Host;
 
 import java.util.HashMap;

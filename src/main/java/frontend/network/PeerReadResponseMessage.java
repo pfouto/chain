@@ -1,7 +1,7 @@
 package frontend.network;
 
 import babel.generic.ProtoMessage;
-import common.ReadOp;
+import frontend.ops.ReadOp;
 import io.netty.buffer.ByteBuf;
 import network.ISerializer;
 

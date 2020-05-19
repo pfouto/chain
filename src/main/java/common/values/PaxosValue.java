@@ -1,4 +1,4 @@
-package chainpaxos.values;
+package common.values;
 
 import io.netty.buffer.ByteBuf;
 import network.ISerializer;
@@ -6,6 +6,7 @@ import network.ISerializer;
 import java.io.IOException;
 
 public abstract class PaxosValue {
+
     interface ValueSerializer<T extends PaxosValue> extends ISerializer<T> {
     }
 

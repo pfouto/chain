@@ -1,9 +1,7 @@
-package common.notifications;
+package frontend.notifications;
 
 import babel.generic.ProtoNotification;
-import babel.generic.ProtoReply;
-import babel.generic.ProtoRequest;
-import common.WriteBatch;
+import frontend.ops.WriteBatch;
 
 public class ExecuteBatchNotification extends ProtoNotification {
 

@@ -1,10 +1,9 @@
-package chainpaxos.values;
+package common.values;
 
 import io.netty.buffer.ByteBuf;
 import network.data.Host;
 
 import java.io.IOException;
-import java.net.UnknownHostException;
 import java.util.Objects;
 
 public class MembershipOp extends PaxosValue {

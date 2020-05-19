@@ -1,7 +1,6 @@
-package common.notifications;
+package frontend.notifications;
 
 import babel.generic.ProtoNotification;
-import common.WriteBatch;
 
 public class InstallSnapshotNotification extends ProtoNotification {
 

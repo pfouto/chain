@@ -1,19 +1,25 @@
-package common.notifications;
+package frontend.notifications;
 
 import babel.generic.ProtoNotification;
 import network.data.Host;
 
-public class GetSnapshotNotification extends ProtoNotification {
+public class DeliverSnapshotNotification extends ProtoNotification {
 
-    public static final short NOTIFICATION_ID = 104;
+    public static final short NOTIFICATION_ID = 106;
 
     private final Host snapshotTarget;
     private final int snapshotInstance;
+    private final byte[] state;
 
-    public GetSnapshotNotification(Host snapshotTarget, int snapshotInstance) {
+    public DeliverSnapshotNotification(Host snapshotTarget, int snapshotInstance, byte[] state) {
         super(NOTIFICATION_ID);
         this.snapshotTarget = snapshotTarget;
         this.snapshotInstance = snapshotInstance;
+        this.state = state;
+    }
+
+    public byte[] getState() {
+        return state;
     }
 
     public Host getSnapshotTarget() {

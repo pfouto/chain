@@ -1,16 +1,15 @@
-package common.utils;
+package frontend.utils;
 
 import babel.events.InternalEvent;
 
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.Queue;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
-public class BetterEventPriorityQueue implements BlockingQueue<InternalEvent> {
+public class EventPriorityQueue implements BlockingQueue<InternalEvent> {
 
     private static final InternalEvent.EventType[] DEFAULT_PRIORITY = {
             InternalEvent.EventType.TIMER_EVENT,
@@ -22,167 +21,179 @@ public class BetterEventPriorityQueue implements BlockingQueue<InternalEvent> {
             InternalEvent.EventType.CUSTOM_CHANNEL_EVENT,
     };
 
-    private final Semaphore semaphore = new Semaphore(0);
 
-    private final InternalEvent.EventType[] priority;
-    private final BlockingQueue<InternalEvent>[] events;
+    private Lock lock = new ReentrantLock();
+    private Condition notEmpty = lock.newCondition();
 
-    public BetterEventPriorityQueue() {
+    private InternalEvent.EventType[] priority;
+    private Queue<InternalEvent>[] events;
+    private int size;
+
+    public EventPriorityQueue() {
         this(DEFAULT_PRIORITY);
     }
 
     @SuppressWarnings("unchecked")
-    public BetterEventPriorityQueue(InternalEvent.EventType[] priority) {
+    public EventPriorityQueue(InternalEvent.EventType[] priority) {
         this.priority = priority;
-        this.events = new BlockingQueue[this.priority.length];
+        this.events = new Queue[this.priority.length];
         for (int i = 0; i < this.events.length; i++)
-            this.events[i] = new LinkedBlockingQueue<>();
+            this.events[i] = new LinkedList<>();
+        size = 0;
     }
 
     @Override
     public boolean add(InternalEvent protocolEvent) {
-        for (int i = 0; i < events.length; i++) {
-            if (protocolEvent.getType() == priority[i]) {
-                events[i].add(protocolEvent);
-                semaphore.release();
-                return true;
-            }
-        }
-        throw new IllegalStateException("Event type not supported: " + protocolEvent);
-    }
-
-    @Override
-    public InternalEvent take() throws InterruptedException {
-        semaphore.acquire();
-
-        InternalEvent taken = null;
-        while (taken == null) {
-            for (Queue<InternalEvent> event : events) {
-                if (!event.isEmpty()) {
-                    taken = event.poll();
-                    if (taken != null)
-                        break;
+        boolean retVal = false;
+        lock.lock();
+        try {
+            for (int i = 0; i < events.length; i++) {
+                if (protocolEvent.getType() == priority[i]) {
+                    retVal = events[i].add(protocolEvent);
+                    this.size++;
+                    notEmpty.signal();
+                    return retVal;
                 }
             }
+        } finally {
+            lock.unlock();
         }
-        return taken;
 
+        return retVal;
     }
 
     @Override
     public boolean offer(InternalEvent protocolEvent) {
-        throw new IllegalStateException();
+        return false;
     }
 
     @Override
     public InternalEvent remove() {
-        throw new IllegalStateException();
+        return null;
     }
 
     @Override
     public InternalEvent poll() {
-        throw new IllegalStateException();
+        return null;
     }
 
     @Override
     public InternalEvent element() {
-        throw new IllegalStateException();
+        return null;
     }
 
     @Override
     public InternalEvent peek() {
-        throw new IllegalStateException();
+        return null;
     }
 
     @Override
     public void put(InternalEvent protocolEvent) throws InterruptedException {
-        throw new IllegalStateException();
 
     }
 
     @Override
     public boolean offer(InternalEvent protocolEvent, long timeout, TimeUnit unit) throws InterruptedException {
-        throw new IllegalStateException();
+        return false;
+    }
+
+    @Override
+    public InternalEvent take() throws InterruptedException {
+        lock.lock();
+        try {
+            while (size == 0)
+                notEmpty.await();
+            for (Queue<InternalEvent> event : events) {
+                if (!event.isEmpty()) {
+                    size--;
+                    return event.poll();
+                }
+            }
+
+        } finally {
+            lock.unlock();
+        }
+        //will never happen?
+        return null;
     }
 
     @Override
     public InternalEvent poll(long timeout, TimeUnit unit) throws InterruptedException {
-        throw new IllegalStateException();
+        return null;
     }
 
     @Override
     public int remainingCapacity() {
-        throw new IllegalStateException();
+        return 0;
     }
 
     @Override
     public boolean remove(Object o) {
-        throw new IllegalStateException();
+        return false;
     }
 
     @Override
     public boolean containsAll(Collection<?> c) {
-        throw new IllegalStateException();
+        return false;
     }
 
     @Override
     public boolean addAll(Collection<? extends InternalEvent> c) {
-        throw new IllegalStateException();
+        return false;
     }
 
     @Override
     public boolean removeAll(Collection<?> c) {
-        throw new IllegalStateException();
+        return false;
     }
 
     @Override
     public boolean retainAll(Collection<?> c) {
-        throw new IllegalStateException();
+        return false;
     }
 
     @Override
     public void clear() {
-        throw new IllegalStateException();
 
     }
 
     @Override
     public int size() {
-        throw new IllegalStateException();
+        return 0;
     }
 
     @Override
     public boolean isEmpty() {
-        return semaphore.availablePermits() == 0;
+        return size == 0;
     }
 
     @Override
     public boolean contains(Object o) {
-        throw new IllegalStateException();
+        return false;
     }
 
     @Override
     public Iterator<InternalEvent> iterator() {
-        throw new IllegalStateException();
+        return null;
     }
 
     @Override
     public Object[] toArray() {
-        throw new IllegalStateException();
+        return new Object[0];
     }
 
     @Override
     public <T> T[] toArray(T[] a) {
-        throw new IllegalStateException();
+        return null;
     }
 
     @Override
     public int drainTo(Collection<? super InternalEvent> c) {
-        throw new IllegalStateException();
+        return 0;
     }
 
     @Override
     public int drainTo(Collection<? super InternalEvent> c, int maxElements) {
-        throw new IllegalStateException();
+        return 0;
     }
 }

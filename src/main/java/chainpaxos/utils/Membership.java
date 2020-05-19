@@ -31,9 +31,12 @@ public class Membership {
     }
 
     private void checkSizeAgainstMaxFailures() {
-        if (members.size() < MIN_QUORUM_SIZE)
+        if (members.size() < MIN_QUORUM_SIZE) {
+            logger.error("Not enough nodes to continue. Current nodes: " + members.size() +
+                    "; min nodes: " + MIN_QUORUM_SIZE);
             throw new AssertionError("Not enough nodes to continue. Current nodes: " + members.size() +
-                                             "; min nodes: " + MIN_QUORUM_SIZE);
+                    "; min nodes: " + MIN_QUORUM_SIZE);
+        }
     }
 
     public boolean isAfterLeader(Host me, Host leader, Host other) {
@@ -77,8 +80,10 @@ public class Membership {
     }
 
     public void addMember(Host host, int position) {
-        if (contains(host))
+        if (contains(host)) {
+            logger.error("Trying to add already existing host: " + host);
             throw new AssertionError("Trying to add already existing host: " + host);
+        }
         indexMap.clear();
         members.add(position, host);
         logger.debug("New " + this);
@@ -87,7 +92,7 @@ public class Membership {
 
     public void removeMember(Host host) {
         if (!contains(host)) {
-            logger.warn("Removing non-existing host: " + host);
+            logger.error("Removing non-existing host: " + host);
             throw new AssertionError("Trying to remove non-existing host: " + host);
         }
         logger.debug("Removing member: " + host);
@@ -106,9 +111,10 @@ public class Membership {
     public Iterator<Host> nextNodesUntil(Host self, Host h){
         int myIdx = indexOf(self);
         int lastIdx = indexOf(h);
-        if(lastIdx < 0 || myIdx < 0)
+        if(lastIdx < 0 || myIdx < 0) {
+            logger.error("Called nextNodesUntil with hosts not in membership");
             throw new RuntimeException("Called nextNodesUntil with hosts not in membership");
-
+        }
         int dist = lastIdx - myIdx;
         if (dist < 0) dist += members.size();
         List<Host> res = new ArrayList<>(dist);
