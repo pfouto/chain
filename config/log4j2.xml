@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="INFO" shutdownHook="disable">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%highlight{%level{length=1}[%d{HH:mm:ss,SSS}] [%t]%logger{0}:} %msg%n"/>
+        </Console>
+
+        <File name="MyFile" fileName="logs/${sys:logFilename}.log" append="false" immediateFlush="true">
+            <PatternLayout pattern="%level{length=1}[%d{HH:mm:ss,SSS}] [%t]%logger{0}: %msg%n"/>
+        </File>
+    </Appenders>
+
+    <Loggers>
+        <Root level="DEBUG">
+            <AppenderRef ref="Console" level="debug"/>
+	    <AppenderRef ref="MyFile" level="debug"/>
+        </Root>
+    </Loggers>
+
+
+</Configuration>
