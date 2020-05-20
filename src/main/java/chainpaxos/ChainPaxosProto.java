@@ -722,14 +722,18 @@ public class ChainPaxosProto extends GenericProtocol {
             membership.removeMember(target);
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                    self.getAddress(), supportedLeader().getAddress(), null));
+                    self.getAddress(),
+                    supportedLeader().getAddress(),
+                    null));
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
             membership.addMember(target, o.position);
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                    self.getAddress(), supportedLeader().getAddress(), null));
+                    self.getAddress(),
+                    supportedLeader().getAddress(),
+                    null));
             nextOk = membership.nextLivingInChain(self);
             openConnection(target);
 

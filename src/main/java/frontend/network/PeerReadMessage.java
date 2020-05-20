@@ -22,7 +22,7 @@ public class PeerReadMessage extends ProtoMessage {
 
     @Override
     public String toString() {
-        return "RedirectReadMessage{" +
+        return "PeerReadMessage{" +
                 "op=" + op +
                 '}';
     }

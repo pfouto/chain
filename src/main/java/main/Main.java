@@ -50,7 +50,7 @@ public class Main {
         GenericProtocol consensusProto;
         if(alg.equals("chain"))
             consensusProto = new ChainPaxosProto(configProps, workerGroup);
-        else if(alg.equals("rep"))
+        else if(alg.equals("chainrep"))
             consensusProto = new ChainReplicationProto(configProps, workerGroup);
         else {
             logger.error("Unknown algorithm: " + alg);

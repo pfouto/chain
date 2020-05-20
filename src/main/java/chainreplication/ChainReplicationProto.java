@@ -17,8 +17,6 @@ import common.values.AppOpBatch;
 import frontend.notifications.*;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
-import org.apache.commons.lang3.tuple.MutablePair;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -123,7 +121,7 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
         registerTimerHandler(JoinTimer.TIMER_ID, this::onJoinTimer);
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
 
-        joinTimer = setupTimer(chainpaxos.timers.JoinTimer.instance, 1000);
+        joinTimer = setupTimer(JoinTimer.instance, 1000);
 
         final ExecutorService service = Executors.newSingleThreadExecutor();
         processNode = new ProcessNode(ZOOKEEPER_URL, self, this);
@@ -219,11 +217,13 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
 
         highestAcceptReceived = msg.iN;
 
+        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) msg.value).getBatch()));
+
         if (membership.isTail()) {
             if (pendingNewTail != null) {
                 sent.add(msg);
             } else {
-                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) msg.value).getBatch()));
+                //triggerNotification(new ExecuteBatchNotification(((AppOpBatch) msg.value).getBatch()));
                 sendMessage(new AcceptAckMsg(msg.iN), processNode.getNodeAddress(membership.prevNode()));
             }
         } else {
@@ -235,7 +235,7 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
     private void uponAcceptAckMsg(AcceptAckMsg msg, Host from, short sourceProto, int channel) {
         while (!sent.isEmpty() && sent.getFirst().iN <= msg.instanceNumber) {
             AcceptMsg toExec = sent.removeFirst();
-            triggerNotification(new ExecuteBatchNotification(((AppOpBatch) toExec.value).getBatch()));
+            //triggerNotification(new ExecuteBatchNotification(((AppOpBatch) toExec.value).getBatch()));
         }
 
         if (!membership.isHead())
@@ -338,7 +338,9 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(id -> processNode.getNodeAddress(id).getAddress())
                             .collect(Collectors.toList()),
-                    self.getAddress(), processNode.getNodeAddress(membership.headId()).getAddress(), null));
+                    self.getAddress(),
+                    processNode.getNodeAddress(membership.headId()).getAddress(),
+                    processNode.getNodeAddress(membership.tailId()).getAddress()));
         }
     }
 

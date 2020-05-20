@@ -2,6 +2,7 @@ package frontend;
 
 import babel.exceptions.HandlerRegistrationException;
 import babel.generic.GenericProtocol;
+import babel.generic.ProtoMessage;
 import channel.simpleclientserver.SimpleServerChannel;
 import channel.simpleclientserver.events.ClientDownEvent;
 import channel.simpleclientserver.events.ClientUpEvent;
@@ -119,15 +120,20 @@ public class FrontendProto extends GenericProtocol {
         registerMessageSerializer(PeerReadMessage.MSG_CODE, PeerReadMessage.serializer);
         registerMessageSerializer(PeerWriteMessage.MSG_CODE, PeerWriteMessage.serializer);
         registerMessageSerializer(PeerReadResponseMessage.MSG_CODE, PeerReadResponseMessage.serializer);
-        registerMessageHandler(peerChannel, PeerReadMessage.MSG_CODE, this::onPeerReadMessage);
-        registerMessageHandler(peerChannel, PeerReadResponseMessage.MSG_CODE, this::onPeerReadResponseMessage);
-        registerMessageHandler(peerChannel, PeerWriteMessage.MSG_CODE, this::onPeerWriteMessage);
-        registerMessageHandler(peerChannel, PeerWriteResponseMessage.MSG_CODE, this::onPeerWriteResponseMessage);
-        registerChannelEventHandler(serverChannel, InConnectionDown.EVENT_ID, this::onInConnectionDown);
-        registerChannelEventHandler(serverChannel, InConnectionUp.EVENT_ID, this::onInConnectionUp);
-        registerChannelEventHandler(serverChannel, OutConnectionDown.EVENT_ID, this::onOutConnectionDown);
-        registerChannelEventHandler(serverChannel, OutConnectionUp.EVENT_ID, this::onOutConnectionUp);
-        registerChannelEventHandler(serverChannel, OutConnectionFailed.EVENT_ID, this::onOutConnectionFailed);
+        registerMessageSerializer(PeerWriteResponseMessage.MSG_CODE, PeerWriteResponseMessage.serializer);
+        registerMessageHandler(peerChannel, PeerReadMessage.MSG_CODE, this::onPeerReadMessage,
+                this::uponMessageFailed);
+        registerMessageHandler(peerChannel, PeerReadResponseMessage.MSG_CODE, this::onPeerReadResponseMessage,
+                this::uponMessageFailed);
+        registerMessageHandler(peerChannel, PeerWriteMessage.MSG_CODE, this::onPeerWriteMessage,
+                this::uponMessageFailed);
+        registerMessageHandler(peerChannel, PeerWriteResponseMessage.MSG_CODE, this::onPeerWriteResponseMessage,
+                this::uponMessageFailed);
+        registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::onInConnectionDown);
+        registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::onInConnectionUp);
+        registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::onOutConnectionDown);
+        registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::onOutConnectionUp);
+        registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::onOutConnectionFailed);
 
         //Consensus
         subscribeNotification(MembershipChange.NOTIFICATION_ID, this::onMembershipChange);
@@ -163,8 +169,9 @@ public class FrontendProto extends GenericProtocol {
             ReadOp op = new ReadOp(internalId, msg.getPayload());
             pendingReads.put(internalId, op);
             sendPeerReadMessage(new PeerReadMessage(op), readsTo);
-        } else
+        } else {
             batchBuffer.add(Pair.of(from, msg));
+        }
     }
 
     private void onReplyMessageFail(ResponseMessage message, Host host, short dProto, Throwable cause, int channel) {
@@ -187,7 +194,6 @@ public class FrontendProto extends GenericProtocol {
     }
 
     private void onPeerWriteResponseMessage(PeerWriteResponseMessage msg, Host from, short sProto, int channel) {
-
         List<Pair<Host, Integer>> ops = idMapper.remove(msg.getBatchId());
         if (ops == null) {
             logger.error("No entry in idMapper");
@@ -222,20 +228,20 @@ public class FrontendProto extends GenericProtocol {
     }
 
     private void onOutConnectionUp(OutConnectionUp event, int channel) {
-        logger.info(event);
+        //logger.info(event);
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
             logger.debug("Connected to writesTo " + peer);
         } else if (peer.equals(readsTo)) {
             logger.debug("Connected to readsTo " + peer);
-        } else {
+        } else if (!responder.equals(self)){
             logger.warn("Unexpected connectionUp, ignoring and closing: " + event);
             closeConnection(peer, peerChannel);
         }
     }
 
     private void onOutConnectionDown(OutConnectionDown event, int channel) {
-        logger.info(event);
+        //logger.info(event);
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
             logger.warn("Lost connection to writesTo, re-connecting: " + event);
@@ -243,8 +249,6 @@ public class FrontendProto extends GenericProtocol {
         } else if (peer.equals(readsTo)) {
             logger.warn("Lost connection to readsTo, re-connecting: " + event);
             connectAndSendPendingToReadsTo();
-        } else {
-            logger.warn("Unexpected connectionDown, ignoring: " + event);
         }
     }
 
@@ -257,8 +261,6 @@ public class FrontendProto extends GenericProtocol {
         } else if (peer.equals(readsTo)) {
             logger.warn("Connection failed to readsTo, re-trying: " + event);
             connectAndSendPendingToReadsTo();
-        } else {
-            logger.warn("Unexpected connectionFailed, ignoring: " + event);
         }
     }
 
@@ -275,11 +277,11 @@ public class FrontendProto extends GenericProtocol {
     }
 
     private void onInConnectionDown(InConnectionDown event, int channel) {
-        logger.info(event);
+        logger.debug(event);
     }
 
     private void onInConnectionUp(InConnectionUp event, int channel) {
-        logger.info(event);
+        logger.debug(event);
     }
 
     private void sendPeerWriteMessage(PeerWriteMessage msg, Host destination) {
@@ -299,9 +301,11 @@ public class FrontendProto extends GenericProtocol {
     }
 
     private void sendPeerWriteResponseMessage(PeerWriteResponseMessage msg, Host destination) {
-        if (destination.getAddress().equals(self))
+        if (destination.getAddress().equals(self)) {
             onPeerWriteResponseMessage(msg, destination, getProtoId(), peerChannel);
-        else sendMessage(peerChannel, msg, destination);
+        } else {
+            sendMessage(peerChannel, msg, destination);
+        }
     }
 
     /* -------------------- ------------- ----------------------------------------------- */
@@ -346,16 +350,17 @@ public class FrontendProto extends GenericProtocol {
     }
 
     int counter = 0;
+
     private void onExecuteBatch(ExecuteBatchNotification reply, short from) {
         //counter++;
         //if(counter % 5000 == 0)
         //    logger.info("State: " + Arrays.toString(incrementalHash));
-        logger.debug("Executing: " + reply.getBatch());
         nWrites += reply.getBatch().getOps().size();
         //incrementalHash = sha1(incrementalHash, reply.getBatch().getBatchId());
-        if (self.equals(responder) || (responder == null && reply.getBatch().getIssuer().equals(self)))
+        if (self.equals(responder) || (responder == null && reply.getBatch().getIssuer().equals(self))) {
             sendPeerWriteResponseMessage(new PeerWriteResponseMessage(reply.getBatch().getBatchId()),
                     new Host(reply.getBatch().getIssuer(), PEER_PORT));
+        }
     }
 
     private void onMembershipChange(MembershipChange notification, short emitterId) {
@@ -395,6 +400,7 @@ public class FrontendProto extends GenericProtocol {
 
         //Started being responder
         if (self.equals(responder)) {
+            logger.info("Am responder.");
             //Open to everyone except writesTo and readsTo (already open on previous step)
             notification.getOrderedMembers().stream().
                     filter(h -> !h.equals(self) && !h.equals(writesTo.getAddress()) && !h.equals(readsTo.getAddress())).
@@ -423,6 +429,10 @@ public class FrontendProto extends GenericProtocol {
             logger.error(e.getMessage());
             throw new AssertionError();
         }
+    }
+
+    private void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
+        logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
     }
 
 }

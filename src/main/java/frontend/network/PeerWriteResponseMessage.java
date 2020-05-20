@@ -23,7 +23,7 @@ public class PeerWriteResponseMessage extends ProtoMessage {
 
     @Override
     public String toString() {
-        return "RedirectMessage{" +
+        return "PeerWriteResponseMessage{" +
                 "batchId=" + batchId +
                 '}';
     }

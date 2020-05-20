@@ -17,7 +17,7 @@
         <dependency>
             <groupId>pt.unl.fct.di.novasys</groupId>
             <artifactId>babel-core</artifactId>
-            <version>0.4.18</version>
+            <version>0.4.19</version>
         </dependency>
         <dependency>
             <groupId>org.apache.zookeeper</groupId>

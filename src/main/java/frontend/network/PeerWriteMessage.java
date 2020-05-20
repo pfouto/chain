@@ -24,7 +24,7 @@ public class PeerWriteMessage extends ProtoMessage {
 
     @Override
     public String toString() {
-        return "RedirectMessage{" +
+        return "PeerWriteMessage{" +
                 "batch=" + batch +
                 '}';
     }
