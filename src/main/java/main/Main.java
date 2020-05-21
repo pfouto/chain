@@ -33,7 +33,7 @@ public class Main {
         Babel babel = Babel.getInstance();
         Properties configProps = babel.loadConfig(args[0], Arrays.copyOfRange(args, 2, args.length));
 
-        logger.info(configProps);
+        logger.debug(configProps);
         if(configProps.containsKey("interface")){
             String address = getAddress(configProps.getProperty("interface"));
             if(address == null) return;

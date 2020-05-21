@@ -15,7 +15,7 @@ class ZooKeeperService {
 
     ZooKeeperService(final String url, final ProcessNode.ProcessNodeWatcher processNodeWatcher) throws IOException {
         System.out.println(url);
-        zooKeeper = new ZooKeeper(url, 10000, processNodeWatcher);
+        zooKeeper = new ZooKeeper(url, 4000, processNodeWatcher);
     }
 
     String createNode(final String node, byte[] data, final boolean watch, final boolean ephemeral) {

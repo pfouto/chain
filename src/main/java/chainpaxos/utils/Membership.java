@@ -14,7 +14,6 @@ public class Membership {
     private final Map<Host, Integer> indexMap;
     private final Set<Host> pendingRemoval;
 
-
     private final int MIN_QUORUM_SIZE;
 
     public Membership(List<Host> initial, int MIN_QUORUM_SIZE) {
@@ -77,6 +76,10 @@ public class Membership {
 
     public boolean contains(Host host) {
         return indexOf(host) >= 0;
+    }
+
+    public Host nodeAt(int pos){
+        return members.get(pos);
     }
 
     public void addMember(Host host, int position) {

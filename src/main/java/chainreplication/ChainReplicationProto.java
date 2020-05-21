@@ -37,16 +37,19 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
     public final static short PROTOCOL_ID = 300;
     public final static String PROTOCOL_NAME = "ChainReplication";
 
+    public static final String[] SUPPORTED_CONSISTENCIES = {"serial"};
+
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
     public static final String JOIN_TIMEOUT_KEY = "join_timeout";
     public static final String ZOOKEEPER_URL_KEY = "zookeeper_url";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
-
+    public static final String CONSISTENCY_KEY = "consistency";
 
     private final int JOIN_TIMEOUT;
     private final int RECONNECT_TIME;
     private final String ZOOKEEPER_URL;
+    private final String CONSISTENCY;
 
     enum State {JOINING, REGISTERING, ACTIVE}
 
@@ -78,6 +81,12 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
         this.JOIN_TIMEOUT = Integer.parseInt(props.getProperty(JOIN_TIMEOUT_KEY));
         this.ZOOKEEPER_URL = props.getProperty(ZOOKEEPER_URL_KEY);
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
+        this.CONSISTENCY = props.getProperty(CONSISTENCY_KEY);
+        if(!Arrays.asList(SUPPORTED_CONSISTENCIES).contains(CONSISTENCY)){
+            logger.error("Unsupported consistency: " + CONSISTENCY);
+            throw new AssertionError("Unsupported consistency: \" + CONSISTENCY");
+        }
+
 
         this.membership = new Membership(-1, Collections.emptyList());
         this.state = State.JOINING;
@@ -338,14 +347,14 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(id -> processNode.getNodeAddress(id).getAddress())
                             .collect(Collectors.toList()),
-                    self.getAddress(),
+                    readsTo(),
                     processNode.getNodeAddress(membership.headId()).getAddress(),
                     processNode.getNodeAddress(membership.tailId()).getAddress()));
         }
     }
 
     private void uponOutConnectionUp(OutConnectionUp event, int channel) {
-        logger.info(event);
+        logger.debug(event);
         if (processNode.getAddresses(membership.getMembers()).contains(event.getNode())) {
             if (membership.isTail()) return;
 
@@ -393,4 +402,12 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
         logger.info(event);
     }
 
+    private InetAddress readsTo(){
+        if (CONSISTENCY.equals("serial")){
+            return processNode.getNodeAddress(membership.tailId()).getAddress();
+        } else {
+            logger.error("Unexpected consistency " + CONSISTENCY);
+            throw new AssertionError("Unexpected consistency " + CONSISTENCY);
+        }
+    }
 }

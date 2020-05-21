@@ -37,6 +37,8 @@ public class ChainPaxosProto extends GenericProtocol {
     public final static short PROTOCOL_ID = 200;
     public final static String PROTOCOL_NAME = "ChainPaxos";
 
+    public static final String[] SUPPORTED_CONSISTENCIES = {"pcs", "serial"};
+
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
     public static final String QUORUM_SIZE_KEY = "quorum_size";
@@ -46,6 +48,7 @@ public class ChainPaxosProto extends GenericProtocol {
     public static final String INITIAL_STATE_KEY = "initial_state";
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
+    public static final String CONSISTENCY_KEY = "consistency";
 
     private final int LEADER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
@@ -54,6 +57,8 @@ public class ChainPaxosProto extends GenericProtocol {
 
     private final int STATE_TRANSFER_TIMEOUT;
     private final int JOIN_TIMEOUT;
+
+    private final String CONSISTENCY;
 
     enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
 
@@ -125,6 +130,12 @@ public class ChainPaxosProto extends GenericProtocol {
 
         this.JOIN_TIMEOUT = Integer.parseInt(props.getProperty(JOIN_TIMEOUT_KEY));
         this.STATE_TRANSFER_TIMEOUT = Integer.parseInt(props.getProperty(STATE_TRANSFER_TIMEOUT_KEY));
+
+        this.CONSISTENCY = props.getProperty(CONSISTENCY_KEY);
+        if(!Arrays.asList(SUPPORTED_CONSISTENCIES).contains(CONSISTENCY)){
+            logger.error("Unsupported consistency: " + CONSISTENCY);
+            throw new AssertionError("Unsupported consistency: \" + CONSISTENCY");
+        }
 
         this.state = State.valueOf(props.getProperty(INITIAL_STATE_KEY));
         seeds = readSeeds(props.getProperty(INITIAL_MEMBERSHIP_KEY));
@@ -648,7 +659,7 @@ public class ChainPaxosProto extends GenericProtocol {
     }
 
     private void uponOutConnectionUp(OutConnectionUp event, int channel) {
-        logger.info(event);
+        logger.debug(event);
         if (membership.contains(event.getNode())) {
             establishedConnections.add(event.getNode());
             if (event.getNode().equals(nextOk))
@@ -720,20 +731,12 @@ public class ChainPaxosProto extends GenericProtocol {
         if (o.opType == MembershipOp.OpType.REMOVE) {
             logger.info("Removed from membership: " + target + " in inst " + instance.iN);
             membership.removeMember(target);
-            triggerNotification(new MembershipChange(
-                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                    self.getAddress(),
-                    supportedLeader().getAddress(),
-                    null));
+            triggerMembershipChangeNotification();
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
             membership.addMember(target, o.position);
-            triggerNotification(new MembershipChange(
-                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                    self.getAddress(),
-                    supportedLeader().getAddress(),
-                    null));
+            triggerMembershipChangeNotification();
             nextOk = membership.nextLivingInChain(self);
             openConnection(target);
 
@@ -777,9 +780,7 @@ public class ChainPaxosProto extends GenericProtocol {
             waitingAppOps.clear();
             waitingMembershipOps.clear();
         }
-        triggerNotification(new MembershipChange(
-                membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                self.getAddress(), sN.getNode().getAddress(), null));
+        triggerMembershipChangeNotification();
     }
 
     private Host supportedLeader() {
@@ -797,7 +798,30 @@ public class ChainPaxosProto extends GenericProtocol {
 
     void sendOrEnqueue(ProtoMessage msg, Host destination) {
         logger.debug("Destination: " + destination);
+        if(msg == null || destination == null){
+            logger.error("null: " + msg + " " + destination);
+        }
         if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
         else sendMessage(msg, destination);
     }
+
+    private void triggerMembershipChangeNotification(){
+        triggerNotification(new MembershipChange(
+                membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+                readsTo(),
+                supportedLeader().getAddress(),
+                null));
+    }
+
+    private InetAddress readsTo(){
+        if(CONSISTENCY.equals("pcs")){
+            return self.getAddress();
+        } else if (CONSISTENCY.equals("serial")){
+            return membership.nodeAt(QUORUM_SIZE-1).getAddress();
+        } else {
+            logger.error("Unexpected consistency " + CONSISTENCY);
+            throw new AssertionError("Unexpected consistency " + CONSISTENCY);
+        }
+    }
+
 }
