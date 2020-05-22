@@ -83,6 +83,7 @@ public class ChainPaxosProto extends GenericProtocol {
     //Leadership
     private Map.Entry<Integer, SeqN> currentSN;
     private boolean amQuorumLeader;
+    private long lastAcceptTime;
 
     //Timers
     private long joinTimer = -1;
@@ -90,7 +91,6 @@ public class ChainPaxosProto extends GenericProtocol {
     private long noOpTimer = -1;
 
     private long lastLeaderOp;
-    private long lastAcceptTime;
 
     //Dynamic membership
     //TODO eventually forget stored states... (irrelevant for experiments)
@@ -204,7 +204,7 @@ public class ChainPaxosProto extends GenericProtocol {
             joinTimer = setupTimer(JoinTimer.instance, 1000);
         }
 
-        logger.info("Starting ChainPaxos: " + membership + " , qs " + QUORUM_SIZE);
+        logger.info("ChainPaxos: " + membership + " qs " + QUORUM_SIZE);
     }
 
     private void setupInitialState(List<Host> members, int instanceNumber) {
@@ -653,7 +653,6 @@ public class ChainPaxosProto extends GenericProtocol {
         lastAcceptTime = System.currentTimeMillis();
     }
 
-
     private void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
         logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
     }
@@ -800,9 +799,10 @@ public class ChainPaxosProto extends GenericProtocol {
         logger.debug("Destination: " + destination);
         if(msg == null || destination == null){
             logger.error("null: " + msg + " " + destination);
+        } else {
+            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
+            else sendMessage(msg, destination);
         }
-        if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
-        else sendMessage(msg, destination);
     }
 
     private void triggerMembershipChangeNotification(){
