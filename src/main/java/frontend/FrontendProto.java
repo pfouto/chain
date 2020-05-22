@@ -69,6 +69,8 @@ public class FrontendProto extends GenericProtocol {
 
     private final EventLoopGroup workerGroup;
 
+    private final byte[] response;
+
     public FrontendProto(Properties props, EventLoopGroup workerGroup) throws IOException {
         super(PROTOCOL_NAME, PROTOCOL_ID);
 
@@ -78,6 +80,7 @@ public class FrontendProto extends GenericProtocol {
         this.workerGroup = workerGroup;
         self = InetAddress.getByName(props.getProperty(ADDRESS_KEY));
         opPrefix = ByteBuffer.wrap(self.getAddress()).getInt();
+        response = new byte[READ_RESPONSE_BYTES];
         opCounter = 0;
         responder = null;
         readsTo = null;
@@ -184,7 +187,7 @@ public class FrontendProto extends GenericProtocol {
 
     private void onPeerReadMessage(PeerReadMessage msg, Host from, short sProto, int channel) {
         sendPeerReadResponseMessage(
-                new PeerReadResponseMessage(new ReadOp(msg.getOp().getOpId(), new byte[READ_RESPONSE_BYTES])), from);
+                new PeerReadResponseMessage(new ReadOp(msg.getOp().getOpId(), response)), from);
     }
 
     private void onPeerReadResponseMessage(PeerReadResponseMessage msg, Host from, short sProto, int channel) {

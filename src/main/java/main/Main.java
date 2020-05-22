@@ -7,6 +7,7 @@ import babel.exceptions.ProtocolAlreadyExistsException;
 import babel.generic.GenericProtocol;
 import chainpaxos.ChainPaxosProto;
 import chainreplication.ChainReplicationProto;
+import distinguishedpaxos.DistinguishedPaxosProto;
 import frontend.FrontendProto;
 import io.netty.channel.EventLoopGroup;
 import network.NetworkManager;
@@ -52,6 +53,8 @@ public class Main {
             consensusProto = new ChainPaxosProto(configProps, workerGroup);
         else if(alg.equals("chainrep"))
             consensusProto = new ChainReplicationProto(configProps, workerGroup);
+        else if(alg.equals("distinguished"))
+            consensusProto = new DistinguishedPaxosProto(configProps, workerGroup);
         else {
             logger.error("Unknown algorithm: " + alg);
             return;
