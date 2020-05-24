@@ -9,7 +9,7 @@ import channel.simpleclientserver.events.ClientUpEvent;
 import channel.tcp.MultithreadedTCPChannel;
 import channel.tcp.events.*;
 import frontend.ops.ReadOp;
-import frontend.ops.WriteBatch;
+import frontend.ops.OpBatch;
 import frontend.notifications.*;
 import frontend.network.*;
 import frontend.timers.BatchTimer;
@@ -58,10 +58,11 @@ public class FrontendProto extends GenericProtocol {
     private final Map<Long, List<Pair<Host, Integer>>> idMapper;
 
     //ToForward
-    private final List<Pair<Host, RequestMessage>> batchBuffer;
+    private final List<Pair<Host, RequestMessage>> writeBatchBuffer;
+    private final List<Pair<Host, RequestMessage>> readBatchBuffer;
     //Forwarded
-    private final Map<Long, ReadOp> pendingReads;
-    private final Map<Long, WriteBatch> pendingWrites;
+    private final Map<Long, OpBatch> pendingReads;
+    private final Map<Long, OpBatch> pendingWrites;
 
     //App state
     private int nWrites;
@@ -85,7 +86,8 @@ public class FrontendProto extends GenericProtocol {
         responder = null;
         readsTo = null;
         writesTo = null;
-        batchBuffer = new LinkedList<>();
+        writeBatchBuffer = new LinkedList<>();
+        readBatchBuffer = new LinkedList<>();
         pendingReads = new HashMap<>();
         pendingWrites = new HashMap<>();
         idMapper = new HashMap<>();
@@ -167,13 +169,9 @@ public class FrontendProto extends GenericProtocol {
 
     private void onRequestMessage(RequestMessage msg, Host from, short sProto, int channel) {
         if (msg.getOpType() == RequestMessage.READ) {
-            long internalId = nextId();
-            idMapper.put(internalId, Collections.singletonList(Pair.of(from, msg.getOpId())));
-            ReadOp op = new ReadOp(internalId, msg.getPayload());
-            pendingReads.put(internalId, op);
-            sendPeerReadMessage(new PeerReadMessage(op), readsTo);
+            readBatchBuffer.add(Pair.of(from, msg));
         } else {
-            batchBuffer.add(Pair.of(from, msg));
+            writeBatchBuffer.add(Pair.of(from, msg));
         }
     }
 
@@ -186,14 +184,29 @@ public class FrontendProto extends GenericProtocol {
     /* -------------------- -------- ----------------------------------------------- */
 
     private void onPeerReadMessage(PeerReadMessage msg, Host from, short sProto, int channel) {
-        sendPeerReadResponseMessage(
-                new PeerReadResponseMessage(new ReadOp(msg.getOp().getOpId(), response)), from);
+        if (!readsTo.getAddress().equals(self)) return;
+
+        int nOps = msg.getBatch().getOps().size();
+        List<byte[]> responses = new ArrayList<>(nOps);
+        for (int i = 0; i < nOps; i++) {
+            responses.add(response);
+        }
+        sendPeerReadResponseMessage(new PeerReadResponseMessage(
+                new OpBatch(msg.getBatch().getBatchId(), msg.getBatch().getIssuer(), responses)), from);
     }
 
     private void onPeerReadResponseMessage(PeerReadResponseMessage msg, Host from, short sProto, int channel) {
-        Pair<Host, Integer> pair = idMapper.get(msg.getOp().getOpId()).get(0);
-        sendMessage(serverChannel, new ResponseMessage(pair.getRight(), ResponseMessage.READ, msg.getOp().getOpData()),
-                pair.getKey());
+        List<Pair<Host, Integer>> ops = idMapper.remove(msg.getResponses().getBatchId());
+        if (ops == null) {
+            logger.error("No entry in idMapper");
+            throw new AssertionError("No entry in idMapper");
+        }
+
+        for (int i = 0; i < ops.size(); i++) {
+            Pair<Host, Integer> pair = ops.get(i);
+            sendMessage(serverChannel, new ResponseMessage(pair.getValue(),
+                    RequestMessage.READ, msg.getResponses().getOps().get(i)), pair.getKey());
+        }
     }
 
     private void onPeerWriteResponseMessage(PeerWriteResponseMessage msg, Host from, short sProto, int channel) {
@@ -211,23 +224,45 @@ public class FrontendProto extends GenericProtocol {
     }
 
     private void handleBatchTimer(BatchTimer timer, long l) {
-        if (batchBuffer.isEmpty()) return;
-        long internalId = nextId();
-        List<Pair<Host, Integer>> opIds = new ArrayList<>(batchBuffer.size());
-        List<byte[]> ops = new ArrayList<>(batchBuffer.size());
-        batchBuffer.forEach(p -> {
-            opIds.add(Pair.of(p.getLeft(), p.getRight().getOpId()));
-            ops.add(p.getRight().getPayload());
-        });
-        batchBuffer.clear();
-        List<Pair<Host, Integer>> put = idMapper.put(internalId, opIds);
-        if (put != null) {
-            logger.error("Duplicate internalId");
-            throw new AssertionError("Duplicate internalId");
+
+        if (!writeBatchBuffer.isEmpty()) {
+            long internalId = nextId();
+            List<Pair<Host, Integer>> opIds = new ArrayList<>(writeBatchBuffer.size());
+            List<byte[]> ops = new ArrayList<>(writeBatchBuffer.size());
+            writeBatchBuffer.forEach(p -> {
+                opIds.add(Pair.of(p.getLeft(), p.getRight().getOpId()));
+                ops.add(p.getRight().getPayload());
+            });
+            writeBatchBuffer.clear();
+            List<Pair<Host, Integer>> put = idMapper.put(internalId, opIds);
+            if (put != null) {
+                logger.error("Duplicate internalId");
+                throw new AssertionError("Duplicate internalId");
+            }
+            OpBatch batch = new OpBatch(internalId, self, ops);
+            pendingWrites.put(internalId, batch);
+            sendPeerWriteMessage(new PeerWriteMessage(batch), writesTo);
         }
-        WriteBatch batch = new WriteBatch(internalId, self, ops);
-        pendingWrites.put(internalId, batch);
-        sendPeerWriteMessage(new PeerWriteMessage(batch), writesTo);
+
+        if (!readBatchBuffer.isEmpty()) {
+            long internalId = nextId();
+            List<Pair<Host, Integer>> opIds = new ArrayList<>(readBatchBuffer.size());
+            List<byte[]> ops = new ArrayList<>(readBatchBuffer.size());
+            readBatchBuffer.forEach(p -> {
+                opIds.add(Pair.of(p.getLeft(), p.getRight().getOpId()));
+                ops.add(p.getRight().getPayload());
+            });
+            readBatchBuffer.clear();
+            List<Pair<Host, Integer>> put = idMapper.put(internalId, opIds);
+            if (put != null) {
+                logger.error("Duplicate internalId");
+                throw new AssertionError("Duplicate internalId");
+            }
+            OpBatch batch = new OpBatch(internalId, self, ops);
+            pendingReads.put(internalId, batch);
+            sendPeerReadMessage(new PeerReadMessage(batch), readsTo);
+
+        }
     }
 
     private void onOutConnectionUp(OutConnectionUp event, int channel) {
@@ -237,7 +272,7 @@ public class FrontendProto extends GenericProtocol {
             logger.debug("Connected to writesTo " + peer);
         } else if (peer.equals(readsTo)) {
             logger.debug("Connected to readsTo " + peer);
-        } else if (!responder.equals(self)){
+        } else if (!responder.equals(self)) {
             logger.warn("Unexpected connectionUp, ignoring and closing: " + event);
             closeConnection(peer, peerChannel);
         }

@@ -1,20 +1,20 @@
 package frontend.notifications;
 
 import babel.generic.ProtoNotification;
-import frontend.ops.WriteBatch;
+import frontend.ops.OpBatch;
 
 public class ExecuteBatchNotification extends ProtoNotification {
 
     public static final short NOTIFICATION_ID = 105;
 
-    private final WriteBatch batch;
+    private final OpBatch batch;
 
-    public ExecuteBatchNotification(WriteBatch batch) {
+    public ExecuteBatchNotification(OpBatch batch) {
         super(NOTIFICATION_ID);
         this.batch = batch;
     }
 
-    public WriteBatch getBatch() {
+    public OpBatch getBatch() {
         return batch;
     }
 }

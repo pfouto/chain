@@ -9,13 +9,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-public class WriteBatch {
+public class OpBatch {
 
     private final long batchId;
     private final InetAddress issuer;
     private final List<byte[]> ops;
 
-    public WriteBatch(long batchId, InetAddress issuer, List<byte[]> ops) {
+    public OpBatch(long batchId, InetAddress issuer, List<byte[]> ops) {
         this.batchId = batchId;
         this.issuer = issuer;
         this.ops = ops;
@@ -45,10 +45,10 @@ public class WriteBatch {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof WriteBatch)) return false;
-        WriteBatch writeBatch = (WriteBatch) o;
-        return batchId == writeBatch.batchId &&
-                issuer.equals(writeBatch.issuer);
+        if (!(o instanceof OpBatch)) return false;
+        OpBatch opBatch = (OpBatch) o;
+        return batchId == opBatch.batchId &&
+                issuer.equals(opBatch.issuer);
     }
 
     @Override
@@ -56,20 +56,20 @@ public class WriteBatch {
         return Objects.hash(batchId, issuer);
     }
 
-    public static ISerializer<WriteBatch> serializer = new ISerializer<>() {
+    public static ISerializer<OpBatch> serializer = new ISerializer<>() {
         @Override
-        public void serialize(WriteBatch writeBatch, ByteBuf out) {
-            out.writeLong(writeBatch.batchId);
-            out.writeBytes(writeBatch.issuer.getAddress());
-            out.writeInt(writeBatch.ops.size());
-            for (byte[] op : writeBatch.ops) {
+        public void serialize(OpBatch opBatch, ByteBuf out) {
+            out.writeLong(opBatch.batchId);
+            out.writeBytes(opBatch.issuer.getAddress());
+            out.writeInt(opBatch.ops.size());
+            for (byte[] op : opBatch.ops) {
                 out.writeInt(op.length);
                 out.writeBytes(op);
             }
         }
 
         @Override
-        public WriteBatch deserialize(ByteBuf in) throws UnknownHostException {
+        public OpBatch deserialize(ByteBuf in) throws UnknownHostException {
             long id = in.readLong();
             byte[] addrBytes = new byte[4];
             in.readBytes(addrBytes);
@@ -81,7 +81,7 @@ public class WriteBatch {
                 in.readBytes(opData);
                 ops.add(opData);
             }
-            return new WriteBatch(id, InetAddress.getByAddress(addrBytes), ops);
+            return new OpBatch(id, InetAddress.getByAddress(addrBytes), ops);
         }
     };
 }

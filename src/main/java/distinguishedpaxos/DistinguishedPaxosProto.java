@@ -4,8 +4,6 @@ import babel.events.MessageInEvent;
 import babel.exceptions.HandlerRegistrationException;
 import babel.generic.GenericProtocol;
 import babel.generic.ProtoMessage;
-import chainpaxos.messages.MembershipOpRequestMsg;
-import common.values.MembershipOp;
 import common.values.NoOpValue;
 import common.values.PaxosValue;
 import distinguishedpaxos.timers.*;
@@ -379,7 +377,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         assert instance.acceptedValue != null;
         assert instance.highestAccept != null;
 
-        sendMessage(new AcceptedMsg(msg.iN, msg.sN, msg.value), from);
+        sendOrEnqueue(new AcceptedMsg(msg.iN, msg.sN, msg.value), from);
         lastLeaderOp = System.currentTimeMillis();
     }
 
@@ -500,7 +498,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
             setupTimer(new ReconnectTimer(ev.getNode()), RECONNECT_TIME);
     }
 
-    private void onReconnectTimer(chainpaxos.timers.ReconnectTimer timer, long timerId) {
+    private void onReconnectTimer(ReconnectTimer timer, long timerId) {
         if (membership.contains(timer.getHost()))
             openConnection(timer.getHost());
     }

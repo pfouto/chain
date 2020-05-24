@@ -1,7 +1,7 @@
 package frontend.network;
 
 import babel.generic.ProtoMessage;
-import frontend.ops.WriteBatch;
+import frontend.ops.OpBatch;
 import io.netty.buffer.ByteBuf;
 import network.ISerializer;
 
@@ -11,14 +11,14 @@ public class PeerWriteMessage extends ProtoMessage {
 
     public static final short MSG_CODE = 103;
 
-    private final WriteBatch batch;
+    private final OpBatch batch;
 
-    public PeerWriteMessage(WriteBatch batch) {
+    public PeerWriteMessage(OpBatch batch) {
         super(MSG_CODE);
         this.batch = batch;
     }
 
-    public WriteBatch getBatch() {
+    public OpBatch getBatch() {
         return batch;
     }
 
@@ -32,12 +32,12 @@ public class PeerWriteMessage extends ProtoMessage {
     public static final ISerializer<PeerWriteMessage> serializer = new ISerializer<>() {
         @Override
         public void serialize(PeerWriteMessage peerWriteMessage, ByteBuf out) throws IOException {
-            WriteBatch.serializer.serialize(peerWriteMessage.batch, out);
+            OpBatch.serializer.serialize(peerWriteMessage.batch, out);
         }
 
         @Override
         public PeerWriteMessage deserialize(ByteBuf in) throws IOException {
-            WriteBatch batch = WriteBatch.serializer.deserialize(in);
+            OpBatch batch = OpBatch.serializer.deserialize(in);
             return new PeerWriteMessage(batch);
         }
     };

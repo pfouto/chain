@@ -1,41 +1,45 @@
 package frontend.network;
 
 import babel.generic.ProtoMessage;
+import frontend.ops.OpBatch;
 import frontend.ops.ReadOp;
 import io.netty.buffer.ByteBuf;
 import network.ISerializer;
+
+import java.io.IOException;
 
 public class PeerReadMessage extends ProtoMessage {
 
     public static final short MSG_CODE = 104;
 
-    private final ReadOp op;
+    private final OpBatch batch;
 
-    public PeerReadMessage(ReadOp op) {
+    public PeerReadMessage(OpBatch batch) {
         super(MSG_CODE);
-        this.op = op;
+        this.batch = batch;
     }
 
-    public ReadOp getOp() {
-        return op;
+    public OpBatch getBatch() {
+        return batch;
     }
 
     @Override
     public String toString() {
         return "PeerReadMessage{" +
-                "op=" + op +
+                "batch=" + batch +
                 '}';
     }
 
     public static final ISerializer<PeerReadMessage> serializer = new ISerializer<>() {
         @Override
-        public void serialize(PeerReadMessage redirectWriteMessage, ByteBuf out) {
-            redirectWriteMessage.op.serialize(out);
+        public void serialize(PeerReadMessage redirectWriteMessage, ByteBuf out) throws IOException {
+            OpBatch.serializer.serialize(redirectWriteMessage.batch, out);
         }
 
         @Override
-        public PeerReadMessage deserialize(ByteBuf in) {
-            return new PeerReadMessage(ReadOp.deserialize(in));
+        public PeerReadMessage deserialize(ByteBuf in) throws IOException {
+            OpBatch batch = OpBatch.serializer.deserialize(in);
+            return new PeerReadMessage(batch);
         }
     };
 }

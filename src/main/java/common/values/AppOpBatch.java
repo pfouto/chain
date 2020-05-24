@@ -1,6 +1,6 @@
 package common.values;
 
-import frontend.ops.WriteBatch;
+import frontend.ops.OpBatch;
 import io.netty.buffer.ByteBuf;
 
 import java.io.IOException;
@@ -8,14 +8,14 @@ import java.util.Objects;
 
 public class AppOpBatch extends PaxosValue {
 
-    private final WriteBatch batch;
+    private final OpBatch batch;
 
-    public AppOpBatch(WriteBatch batch) {
+    public AppOpBatch(OpBatch batch) {
         super(Type.APP_BATCH);
         this.batch = batch;
     }
 
-    public WriteBatch getBatch() {
+    public OpBatch getBatch() {
         return batch;
     }
 
@@ -42,12 +42,12 @@ public class AppOpBatch extends PaxosValue {
     static ValueSerializer serializer = new ValueSerializer<AppOpBatch>() {
         @Override
         public void serialize(AppOpBatch appOpBatch, ByteBuf out) throws IOException {
-            WriteBatch.serializer.serialize(appOpBatch.batch, out);
+            OpBatch.serializer.serialize(appOpBatch.batch, out);
         }
 
         @Override
         public AppOpBatch deserialize(ByteBuf in) throws IOException {
-            WriteBatch batch = WriteBatch.serializer.deserialize(in);
+            OpBatch batch = OpBatch.serializer.deserialize(in);
             return new AppOpBatch(batch);
         }
     };
