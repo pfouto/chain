@@ -315,9 +315,7 @@ public class EPaxosProto extends GenericProtocol {
         LinkedList<Host> peers = new LinkedList<>();
         String[] initialMembership = membershipProp.split(",");
         for (String s : initialMembership) {
-            s = s.trim();
-            String[] fields = s.split(":");
-            peers.add(new Host(InetAddress.getByName(fields[0]), Integer.parseInt(fields[1])));
+            peers.add(new Host(InetAddress.getByName(s), self.getPort()));
         }
         return peers;
     }

@@ -391,10 +391,11 @@ public class FrontendProto extends GenericProtocol {
 
     private void onExecuteBatch(ExecuteBatchNotification reply, short from) {
         //counter++;
-        //if(counter % 5000 == 0)
+        //if(counter % 10000 == 0)
         //    logger.info("State: " + Arrays.toString(incrementalHash));
-        nWrites += reply.getBatch().getOps().size();
         //incrementalHash = sha1(incrementalHash, reply.getBatch().getBatchId());
+
+        nWrites += reply.getBatch().getOps().size();
         if (self.equals(responder) || (responder == null && reply.getBatch().getIssuer().equals(self))) {
             sendPeerWriteResponseMessage(new PeerWriteResponseMessage(reply.getBatch().getBatchId()),
                     new Host(reply.getBatch().getIssuer(), PEER_PORT));
