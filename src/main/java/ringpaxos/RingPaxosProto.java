@@ -162,7 +162,6 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
 
         subscribeNotification(SubmitBatchNotification.NOTIFICATION_ID, this::onSubmitBatch);
 
-        //TODO setup udp
         BaseProtoMessageSerializer serializer = new BaseProtoMessageSerializer(new ConcurrentHashMap<>());
         serializer.registerProtoSerializer(AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
         serializer.registerProtoSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
