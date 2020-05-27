@@ -30,12 +30,12 @@ import java.util.stream.Collectors;
 
 import static epaxos.utils.Instance.InstanceState.*;
 
-public class EPaxosProto extends GenericProtocol {
+public class EsolatedPaxosProto extends GenericProtocol {
 
-    private static final Logger logger = LogManager.getLogger(EPaxosProto.class);
+    private static final Logger logger = LogManager.getLogger(EsolatedPaxosProto.class);
 
     public final static short PROTOCOL_ID = 500;
-    public final static String PROTOCOL_NAME = "EPaxos";
+    public final static String PROTOCOL_NAME = "EsolatedPaxos";
 
     public static final String[] SUPPORTED_CONSISTENCIES = {"pcs"};
 
@@ -67,7 +67,7 @@ public class EPaxosProto extends GenericProtocol {
     private final EventLoopGroup workerGroup;
     private int peerChannel;
 
-    public EPaxosProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
+    public EsolatedPaxosProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME, PROTOCOL_ID);
         this.workerGroup = workerGroup;
 
@@ -135,7 +135,7 @@ public class EPaxosProto extends GenericProtocol {
 
         triggerMembershipChangeNotification();
 
-        logger.info("EPaxos: " + membership + " mcf " + MAX_CONCURRENT_FAILS);
+        logger.info("EsolatedPaxos: " + membership + " mcf " + MAX_CONCURRENT_FAILS);
     }
 
     public void onSubmitBatch(SubmitBatchNotification not, short from) {
@@ -153,16 +153,12 @@ public class EPaxosProto extends GenericProtocol {
         Map<Host, Integer> deps = new HashMap<>();
         int seqNumber = -1;
 
-        for (Map.Entry<Host, ConcurrentMap<Integer, Instance>> entry : instances.entrySet()) {
-            Integer highestInstNumber = highestReceivedInstance.get(entry.getKey());
-            if (highestInstNumber == null) continue;
-
-            Instance highestInst = entry.getValue().get(highestInstNumber);
-
+        Integer highestInstNumber = highestReceivedInstance.get(self);
+        if (highestInstNumber != null) {
+            Instance highestInst = instances.get(self).get(highestInstNumber);
             assert highestInst != null;
             assert highestInst.getState() != PLACEHOLDER;
-
-            deps.put(entry.getKey(), highestInstNumber);
+            deps.put(self, highestInstNumber);
             seqNumber = Math.max(highestInst.getSeqNumber(), seqNumber);
         }
 
@@ -186,17 +182,17 @@ public class EPaxosProto extends GenericProtocol {
         Map<Host, Integer> deps = msg.deps;
         int seqNumber = msg.sN;
         //Update deps/sN
-        for (Map.Entry<Host, ConcurrentMap<Integer, Instance>> entry : instances.entrySet()) {
-            Integer highestInstNumber = highestReceivedInstance.get(entry.getKey());
+        ConcurrentMap<Integer, Instance> entry = instances.get(from);
+        Integer highestInstNumber = highestReceivedInstance.get(from);
 
-            if (highestInstNumber != null && highestInstNumber > deps.getOrDefault(entry.getKey(), -1)) {
-                Instance highestInst = entry.getValue().get(highestInstNumber);
-                assert highestInst != null;
-                assert highestInst.getState() != PLACEHOLDER;
-                deps.put(entry.getKey(), highestInstNumber);
-                seqNumber = Math.max(highestInst.getSeqNumber() + 1, seqNumber);
-            }
+        if (highestInstNumber != null && highestInstNumber > deps.getOrDefault(from, -1)) {
+            Instance highestInst = entry.get(highestInstNumber);
+            assert highestInst != null;
+            assert highestInst.getState() != PLACEHOLDER;
+            deps.put(from, highestInstNumber);
+            seqNumber = Math.max(highestInst.getSeqNumber() + 1, seqNumber);
         }
+
         Instance inst = instances.get(msg.replica).computeIfAbsent(msg.iN,
                 k -> new Instance(msg.replica, msg.iN, msg.ballot));
         inst.preAccept(msg.value, seqNumber, deps);

@@ -8,12 +8,15 @@ import babel.generic.GenericProtocol;
 import chainpaxos.ChainPaxosProto;
 import chainreplication.ChainReplicationProto;
 import distinguishedpaxos.DistinguishedPaxosProto;
+import distinguishedpaxos.MultiPaxosProto;
 import epaxos.EPaxosProto;
+import epaxos.EsolatedPaxosProto;
 import frontend.FrontendProto;
 import io.netty.channel.EventLoopGroup;
 import network.NetworkManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import ringpaxos.RingPaxosProto;
 
 import java.io.IOException;
 import java.net.Inet4Address;
@@ -56,8 +59,14 @@ public class Main {
             consensusProto = new ChainReplicationProto(configProps, workerGroup);
         else if(alg.equals("distinguished"))
             consensusProto = new DistinguishedPaxosProto(configProps, workerGroup);
+        else if(alg.equals("multi"))
+            consensusProto = new MultiPaxosProto(configProps, workerGroup);
         else if(alg.equals("epaxos"))
             consensusProto = new EPaxosProto(configProps, workerGroup);
+        else if(alg.equals("esolatedpaxos"))
+            consensusProto = new EsolatedPaxosProto(configProps, workerGroup);
+        else if(alg.equals("ring"))
+            consensusProto = new RingPaxosProto(configProps, workerGroup);
         else {
             logger.error("Unknown algorithm: " + alg);
             return;

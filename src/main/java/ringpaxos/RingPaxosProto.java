@@ -1,28 +1,23 @@
-package distinguishedpaxos;
+package ringpaxos;
 
 import babel.events.MessageInEvent;
 import babel.exceptions.HandlerRegistrationException;
+import babel.generic.BaseProtoMessageSerializer;
 import babel.generic.GenericProtocol;
 import babel.generic.ProtoMessage;
+import channel.tcp.MultithreadedTCPChannel;
+import channel.tcp.events.*;
+import common.values.AppOpBatch;
 import common.values.NoOpValue;
 import common.values.PaxosValue;
-import distinguishedpaxos.timers.*;
-import channel.tcp.events.*;
-import distinguishedpaxos.messages.*;
-import channel.tcp.MultithreadedTCPChannel;
-import common.values.AppOpBatch;
-import distinguishedpaxos.messages.AcceptMsg;
-import distinguishedpaxos.messages.DecidedMsg;
-import distinguishedpaxos.messages.PrepareMsg;
-import distinguishedpaxos.messages.PrepareOkMsg;
-import distinguishedpaxos.timers.LeaderTimer;
-import distinguishedpaxos.utils.AcceptedValue;
-import distinguishedpaxos.utils.InstanceState;
-import distinguishedpaxos.utils.Membership;
-import distinguishedpaxos.utils.SeqN;
 import frontend.notifications.ExecuteBatchNotification;
 import frontend.notifications.MembershipChange;
+import network.Connection;
+import network.listeners.MessageListener;
+import ringpaxos.timers.*;
 import frontend.notifications.SubmitBatchNotification;
+import ringpaxos.messages.*;
+import ringpaxos.utils.*;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
 import org.apache.logging.log4j.LogManager;
@@ -32,14 +27,15 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-public class DistinguishedPaxosProto extends GenericProtocol {
+public class RingPaxosProto extends GenericProtocol implements MessageListener<ProtoMessage> {
 
-    private static final Logger logger = LogManager.getLogger(DistinguishedPaxosProto.class);
+    private static final Logger logger = LogManager.getLogger(RingPaxosProto.class);
 
-    public final static short PROTOCOL_ID = 400;
-    public final static String PROTOCOL_NAME = "DistPaxos";
+    public final static short PROTOCOL_ID = 600;
+    public final static String PROTOCOL_NAME = "RingPaxos";
 
     public static final String[] SUPPORTED_CONSISTENCIES = {"pcs", "serial"};
 
@@ -54,11 +50,17 @@ public class DistinguishedPaxosProto extends GenericProtocol {
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String CONSISTENCY_KEY = "consistency";
+    public static final String ACCEPT_TIMEOUT_KEY = "accept_timeout";
+    public static final String REQ_TIMEOUT_KEY = "req_timeout";
+    public static final String MAX_BATCH_SIZE_KEY = "max_batch_bytes";
 
     private final int LEADER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
+    private final int ACCEPT_TIMEOUT;
+    private final int REQ_TIMEOUT;
+    private final int MAX_BATCH_SIZE;
 
     private final String CONSISTENCY;
 
@@ -72,25 +74,21 @@ public class DistinguishedPaxosProto extends GenericProtocol {
 
     private int highestAcceptedInstance = -1;
     private int highestDecidedInstance = -1;
-    private int lastAcceptSent = -1;
 
-    //Leadership
     private Map.Entry<Integer, SeqN> currentSN;
     private boolean amQuorumLeader;
     private long lastAcceptTime;
 
     //Timers
     private long noOpTimer = -1;
-
     private long lastLeaderOp;
 
     private final LinkedList<Host> seeds;
-
     private final EventLoopGroup workerGroup;
-
     private int peerChannel;
+    private Multicast multicastNetwork;
 
-    public DistinguishedPaxosProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
+    public RingPaxosProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME, PROTOCOL_ID);
         this.workerGroup = workerGroup;
 
@@ -102,6 +100,13 @@ public class DistinguishedPaxosProto extends GenericProtocol {
 
         this.QUORUM_SIZE = Integer.parseInt(props.getProperty(QUORUM_SIZE_KEY));
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
+        this.ACCEPT_TIMEOUT = Integer.parseInt(props.getProperty(ACCEPT_TIMEOUT_KEY));
+        this.REQ_TIMEOUT = Integer.parseInt(props.getProperty(REQ_TIMEOUT_KEY));
+        this.MAX_BATCH_SIZE = Integer.parseInt(props.getProperty(MAX_BATCH_SIZE_KEY));
+        if (MAX_BATCH_SIZE <= 0 || MAX_BATCH_SIZE > 65000 - 1000) {
+            logger.error("MAX_BATCH_SIZE too high: " + MAX_BATCH_SIZE);
+            throw new AssertionError("MAX_BATCH_SIZE too high: " + MAX_BATCH_SIZE);
+        }
 
         this.LEADER_TIMEOUT = Integer.parseInt(props.getProperty(LEADER_TIMEOUT_KEY));
         this.NOOP_SEND_INTERVAL = LEADER_TIMEOUT / 3;
@@ -114,6 +119,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
 
         this.state = State.valueOf(props.getProperty(INITIAL_STATE_KEY));
         seeds = readSeeds(props.getProperty(INITIAL_MEMBERSHIP_KEY));
+
     }
 
     @Override
@@ -132,6 +138,8 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         registerMessageSerializer(DecisionMsg.MSG_CODE, DecisionMsg.serializer);
         registerMessageSerializer(PrepareMsg.MSG_CODE, PrepareMsg.serializer);
         registerMessageSerializer(PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
+        registerMessageSerializer(ReqAcceptMsg.MSG_CODE, ReqAcceptMsg.serializer);
+        registerMessageSerializer(ReqDecisionMsg.MSG_CODE, ReqDecisionMsg.serializer);
 
         registerMessageHandler(peerChannel, AcceptedMsg.MSG_CODE, this::uponAcceptedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
@@ -139,6 +147,8 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         registerMessageHandler(peerChannel, DecisionMsg.MSG_CODE, this::uponDecisionMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, PrepareMsg.MSG_CODE, this::uponPrepareMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, PrepareOkMsg.MSG_CODE, this::uponPrepareOkMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, ReqAcceptMsg.MSG_CODE, this::uponReqAcceptMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, ReqDecisionMsg.MSG_CODE, this::uponReqDecisionMsg, this::uponMessageFailed);
 
         registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
@@ -151,6 +161,23 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
 
         subscribeNotification(SubmitBatchNotification.NOTIFICATION_ID, this::onSubmitBatch);
+
+        //TODO setup udp
+        BaseProtoMessageSerializer serializer = new BaseProtoMessageSerializer(new ConcurrentHashMap<>());
+        serializer.registerProtoSerializer(AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
+        serializer.registerProtoSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        serializer.registerProtoSerializer(DecidedMsg.MSG_CODE, DecidedMsg.serializer);
+        serializer.registerProtoSerializer(DecisionMsg.MSG_CODE, DecisionMsg.serializer);
+        serializer.registerProtoSerializer(PrepareMsg.MSG_CODE, PrepareMsg.serializer);
+        serializer.registerProtoSerializer(PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
+        serializer.registerProtoSerializer(ReqAcceptMsg.MSG_CODE, ReqAcceptMsg.serializer);
+        serializer.registerProtoSerializer(ReqDecisionMsg.MSG_CODE, ReqDecisionMsg.serializer);
+        try {
+            multicastNetwork = new Multicast(serializer, this, MAX_BATCH_SIZE);
+        } catch (InterruptedException e) {
+            logger.error("Error creating multicast: " + e.getMessage());
+            throw new AssertionError("Error creating multicast: " + e.getMessage());
+        }
 
         if (state == State.ACTIVE) {
             if (!seeds.contains(self)) {
@@ -168,7 +195,12 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
         lastLeaderOp = System.currentTimeMillis();
 
-        logger.info("DistinguishedPaxos: " + membership + " qs " + QUORUM_SIZE);
+        logger.info("RingPaxos: " + membership + " qs " + QUORUM_SIZE);
+    }
+
+    @Override
+    public void deliverMessage(ProtoMessage msg, Connection<ProtoMessage> conn) {
+        this.deliverMessageIn(new MessageInEvent(msg,null, peerChannel));
     }
 
     private void onLeaderTimer(LeaderTimer timer, long timerId) {
@@ -219,7 +251,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
             } else
                 logger.warn("Discarding prepare since sN <= hP");
         } else { //Respond with decided message
-            logger.debug("Responding with decided");
+            logger.info("Responding with decided");
             List<AcceptedValue> values = new ArrayList<>(highestDecidedInstance - msg.iN + 1);
             for (int i = msg.iN; i <= highestDecidedInstance; i++) {
                 InstanceState decidedInstance = instances.get(i);
@@ -298,8 +330,6 @@ public class DistinguishedPaxosProto extends GenericProtocol {
             this.deliverMessageIn(new MessageInEvent(new AcceptMsg(i, currentSN.getValue(), aI.acceptedValue),
                     self, peerChannel));
         }
-        lastAcceptSent = highestAcceptedInstance;
-
         PaxosValue nextOp;
         while ((nextOp = waitingAppOps.poll()) != null) {
             sendNextAccept(nextOp);
@@ -318,7 +348,8 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         //Update decided values
         for (AcceptedValue decidedValue : msg.decidedValues) {
             InstanceState decidedInst = instances.computeIfAbsent(decidedValue.instance, InstanceState::new);
-            instance.registerPeerDecision(decidedValue.sN, decidedValue.value);
+            instance.forceAccept(decidedValue.sN, decidedValue.value);
+            instance.markCanDecide(decidedValue.sN);
             if (!decidedInst.isDecided())
                 maybeDecideAndExecute(decidedInst.iN);
         }
@@ -329,10 +360,23 @@ public class DistinguishedPaxosProto extends GenericProtocol {
     }
 
     private void sendNextAccept(PaxosValue val) {
-        assert supportedLeader().equals(self) && amQuorumLeader;
+        //Check if old accepts timed out
+        long now = System.currentTimeMillis();
+        for (int i = highestDecidedInstance + 1; i <= highestAcceptedInstance; i++) {
+            InstanceState oldestInst = instances.computeIfAbsent(i, InstanceState::new);
+            if (oldestInst.canDecide()) continue;
 
-        InstanceState instance = instances.computeIfAbsent(Math.max(highestAcceptedInstance, lastAcceptSent) + 1,
-                InstanceState::new);
+            if (now - oldestInst.getAcceptSentTime() > ACCEPT_TIMEOUT) {
+                //acceptsSentUDP++;
+                oldestInst.setAcceptSentTime(now);
+                AcceptMsg acceptMsg = new AcceptMsg(oldestInst.iN, oldestInst.highestAccept, oldestInst.acceptedValue);
+                multicastNetwork.sendMulticast(acceptMsg);
+            } else {
+                break;
+            }
+        }
+
+        InstanceState instance = instances.computeIfAbsent(highestAcceptedInstance + 1, InstanceState::new);
         assert instance.acceptedValue == null && instance.highestAccept == null;
 
         PaxosValue nextValue;
@@ -345,10 +389,14 @@ public class DistinguishedPaxosProto extends GenericProtocol {
             //nOpsBatched += ops.size();
         } else
             nextValue = new NoOpValue();
-        AcceptMsg acceptMsg = new AcceptMsg(instance.iN, currentSN.getValue(), nextValue);
-        membership.getMembers().forEach(h -> sendOrEnqueue(acceptMsg, h));
 
-        lastAcceptSent = instance.iN;
+        instance.setAcceptSentTime(System.currentTimeMillis());
+        AcceptMsg acceptMsg = new AcceptMsg(instance.iN, currentSN.getValue(), nextValue);
+        instance.accept(acceptMsg.sN, acceptMsg.value);
+        multicastNetwork.sendMulticast(acceptMsg);
+
+        highestAcceptedInstance = instance.iN;
+
         lastAcceptTime = System.currentTimeMillis();
     }
 
@@ -371,13 +419,15 @@ public class DistinguishedPaxosProto extends GenericProtocol {
 
         //Normal paxos - Accept
         instance.accept(msg.sN, msg.value);
-        if (highestAcceptedInstance < instance.iN) {
-            highestAcceptedInstance = instance.iN;
-        }
+        highestAcceptedInstance = Math.max(highestAcceptedInstance, instance.iN);
         assert instance.acceptedValue != null;
         assert instance.highestAccept != null;
 
-        sendOrEnqueue(new AcceptedMsg(msg.iN, msg.sN, msg.value), from);
+        int indexOfLeader = membership.indexOf(msg.sN.getNode());
+        int myIndex = membership.indexOf(self);
+        if ((indexOfLeader + QUORUM_SIZE - 1) % membership.size() == myIndex) {
+            sendMessage(new AcceptedMsg(msg.iN, msg.sN), membership.atIndex(myIndex - 1));
+        }
         lastLeaderOp = System.currentTimeMillis();
     }
 
@@ -387,51 +437,73 @@ public class DistinguishedPaxosProto extends GenericProtocol {
             logger.warn("Discarding accept since sN < hP: " + msg);
             return;
         }
+        if (instance.isDecided())
+            return;
 
-        assert !instance.isDecided() || instance.acceptedValue.equals(msg.value);
-        assert instance.highestAccept == null || msg.sN.greaterThan(instance.highestAccept)
-                || instance.acceptedValue.equals(msg.value);
+        if (instance.highestAccept == null)
+            instance.highestAccept = msg.sN;
 
-        highestAcceptedInstance = Math.max(highestAcceptedInstance, instance.iN);
-
-        int accepteds = instance.registerAccepted(msg.sN, msg.value, from);
-        if (!instance.isDecided() && (instance.isPeerDecided() || accepteds >= QUORUM_SIZE)) { //We have quorum!
-            maybeDecideAndExecute(instance.iN);
-        }
+        if (instance.highestAccept.equals(msg.sN)) {
+            if (msg.sN.getNode().equals(self)) {
+                multicastNetwork.sendMulticast(new DecisionMsg(instance.iN, instance.highestAccept));
+            } else {
+                sendMessage(new AcceptedMsg(msg.iN, msg.sN), membership.atIndex(membership.indexOf(self) - 1));
+            }
+        } else
+            throw new AssertionError();
     }
 
     private void uponDecisionMsg(DecisionMsg msg, Host from, short sourceProto, int channel) {
         InstanceState instance = instances.computeIfAbsent(msg.iN, InstanceState::new);
-
-        if (instance.isDecided()) {
-            assert instance.acceptedValue.equals(msg.value);
-            //logger.warn("Ignoring msg: " + msg);
-            //TODO eventually forget values (when receiving decision from everyone?) (irrelevant for experiments)
-        } else {
-            assert msg.sN.greaterThan(instance.highestAccept) || instance.acceptedValue.equals(msg.value);
-            highestAcceptedInstance = Math.max(highestAcceptedInstance, instance.iN);
-            instance.registerPeerDecision(msg.sN, msg.value);
-            maybeDecideAndExecute(instance.iN);
-        }
-        instance.nodesDecided++;
-        if (instance.nodesDecided == membership.size()) {
-            instances.remove(msg.iN);
-        }
+        if (instance.isDecided())
+            return;
+        instance.markCanDecide(msg.sN);
+        maybeDecideAndExecute(instance.iN);
         lastLeaderOp = System.currentTimeMillis();
     }
 
+    private void uponReqDecisionMsg(ReqDecisionMsg msg, Host from, short sourceProto, int channel) {
+        InstanceState inst = instances.computeIfAbsent(msg.iN, InstanceState::new);
+        if (inst.canDecide()) {
+            sendMessage(new DecisionMsg(inst.iN, inst.highestAccept), from);
+        }
+    }
+
+    private void uponReqAcceptMsg(ReqAcceptMsg msg, Host from, short sourceProto, int channel) {
+        InstanceState inst = instances.computeIfAbsent(msg.iN, InstanceState::new);
+        if (inst.acceptedValue != null) {
+            sendMessage(new AcceptMsg(inst.iN, inst.highestAccept, inst.acceptedValue), from);
+        }
+    }
+
     private void maybeDecideAndExecute(int instanceNumber) {
-        if (instanceNumber != highestDecidedInstance + 1)
-            return;
+        //Missing old decisions
+        if (instanceNumber != highestDecidedInstance + 1) {
+            long now = System.currentTimeMillis();
+            for (int i = highestDecidedInstance + 1; i < instanceNumber; i++) {
+                InstanceState oldInst = instances.computeIfAbsent(i, InstanceState::new);
+                if (!oldInst.canDecide() && now - oldInst.getDecisionReqTS() > REQ_TIMEOUT) {
+                    sendMessage(new ReqDecisionMsg(i),
+                            membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
+                    oldInst.setDecisionReqTS(now);
+                }
+            }
+        }
 
         InstanceState instance = instances.computeIfAbsent(highestDecidedInstance + 1, InstanceState::new);
-
-        while (instance.isPeerDecided() || instance.getAccepteds() >= QUORUM_SIZE) {
-            assert !instance.isDecided();
-            decideAndExecute(instance);
-            if (instance.highestAccept.getNode().equals(self)) {
-                DecisionMsg dMsg = new DecisionMsg(instance.iN, instance.highestAccept, instance.acceptedValue);
-                membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(h -> sendOrEnqueue(dMsg, h));
+        while (instance.canDecide()) {
+            if (instance.acceptedValue != null) {
+                assert !instance.isDecided();
+                decideAndExecute(instance);
+            } else {
+                long now = System.currentTimeMillis();
+                if (now - instance.getAcceptReqTS() > REQ_TIMEOUT) {
+                    //logger.warn("Asking for accept: " + instance.iN);
+                    sendMessage(new ReqAcceptMsg(instance.iN),
+                            membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
+                    instance.setAcceptReqTS(now);
+                }
+                break;
             }
             instance = instances.computeIfAbsent(highestDecidedInstance + 1, InstanceState::new);
         }
@@ -454,16 +526,6 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         }
     }
 
-    void sendOrEnqueue(ProtoMessage msg, Host destination) {
-        logger.debug("Destination: " + destination);
-        if (msg == null || destination == null) {
-            logger.error("null: " + msg + " " + destination);
-        } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
-            else sendMessage(msg, destination);
-        }
-    }
-
     public void onSubmitBatch(SubmitBatchNotification not, short from) {
         if (amQuorumLeader)
             sendNextAccept(new AppOpBatch(not.getBatch()));
@@ -475,6 +537,16 @@ public class DistinguishedPaxosProto extends GenericProtocol {
 
     private Host supportedLeader() {
         return currentSN.getValue().getNode();
+    }
+
+    void sendOrEnqueue(ProtoMessage msg, Host destination) {
+        logger.debug("Destination: " + destination);
+        if (msg == null || destination == null) {
+            logger.error("null: " + msg + " " + destination);
+        } else {
+            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
+            else sendMessage(msg, destination);
+        }
     }
 
     private void uponOutConnectionUp(OutConnectionUp event, int channel) {
@@ -510,7 +582,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         logger.info(event);
     }
 
-    private void triggerMembershipChangeNotification(){
+    private void triggerMembershipChangeNotification() {
         triggerNotification(new MembershipChange(
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                 readsTo(),
@@ -518,10 +590,10 @@ public class DistinguishedPaxosProto extends GenericProtocol {
                 null));
     }
 
-    private InetAddress readsTo(){
-        if(CONSISTENCY.equals("pcs")){
+    private InetAddress readsTo() {
+        if (CONSISTENCY.equals("pcs")) {
             return self.getAddress();
-        } else if (CONSISTENCY.equals("serial")){
+        } else if (CONSISTENCY.equals("serial")) {
             return supportedLeader().getAddress();
         } else {
             logger.error("Unexpected consistency " + CONSISTENCY);

@@ -38,10 +38,12 @@ public class FrontendProto extends GenericProtocol {
     public static final String SERVER_PORT_KEY = "frontend_server_port";
     public static final String READ_RESPONSE_BYTES_KEY = "read_response_bytes";
     public static final String BATCH_INTERVAL_KEY = "batch_interval";
+    public static final String MAX_BATCH_SIZE_KEY = "max_batch_bytes";
 
     private final int READ_RESPONSE_BYTES;
     private final int PEER_PORT;
     private final int BATCH_INTERVAL;
+    private final int MAX_BATCH_SIZE;
 
     private final InetAddress self;
     private int serverChannel;
@@ -58,8 +60,8 @@ public class FrontendProto extends GenericProtocol {
     private final Map<Long, List<Pair<Host, Integer>>> idMapper;
 
     //ToForward
-    private final List<Pair<Host, RequestMessage>> writeBatchBuffer;
-    private final List<Pair<Host, RequestMessage>> readBatchBuffer;
+    private final Queue<Pair<Host, RequestMessage>> writeBatchBuffer;
+    private final Queue<Pair<Host, RequestMessage>> readBatchBuffer;
     //Forwarded
     private final Map<Long, OpBatch> pendingReads;
     private final Map<Long, OpBatch> pendingWrites;
@@ -78,6 +80,9 @@ public class FrontendProto extends GenericProtocol {
         this.READ_RESPONSE_BYTES = Integer.parseInt(props.getProperty(READ_RESPONSE_BYTES_KEY));
         this.PEER_PORT = Integer.parseInt(props.getProperty(PEER_PORT_KEY));
         this.BATCH_INTERVAL = Integer.parseInt(props.getProperty(BATCH_INTERVAL_KEY));
+        int maxBatchSize = Integer.parseInt(props.getProperty(MAX_BATCH_SIZE_KEY));
+        MAX_BATCH_SIZE = maxBatchSize <= 0 ? Integer.MAX_VALUE : maxBatchSize;
+
         this.workerGroup = workerGroup;
         self = InetAddress.getByName(props.getProperty(ADDRESS_KEY));
         opPrefix = ByteBuffer.wrap(self.getAddress()).getInt();
@@ -225,15 +230,17 @@ public class FrontendProto extends GenericProtocol {
 
     private void handleBatchTimer(BatchTimer timer, long l) {
 
-        if (!writeBatchBuffer.isEmpty()) {
-            long internalId = nextId();
-            List<Pair<Host, Integer>> opIds = new ArrayList<>(writeBatchBuffer.size());
-            List<byte[]> ops = new ArrayList<>(writeBatchBuffer.size());
-            writeBatchBuffer.forEach(p -> {
+        while (!writeBatchBuffer.isEmpty()) {
+            List<Pair<Host, Integer>> opIds = new LinkedList<>();
+            List<byte[]> ops = new LinkedList<>();
+            int batchSize = 0;
+            while (batchSize + 1100 < MAX_BATCH_SIZE && !writeBatchBuffer.isEmpty()) {
+                Pair<Host, RequestMessage> p = writeBatchBuffer.remove();
                 opIds.add(Pair.of(p.getLeft(), p.getRight().getOpId()));
                 ops.add(p.getRight().getPayload());
-            });
-            writeBatchBuffer.clear();
+                batchSize += p.getRight().getPayload().length;
+            }
+            long internalId = nextId();
             List<Pair<Host, Integer>> put = idMapper.put(internalId, opIds);
             if (put != null) {
                 logger.error("Duplicate internalId");
@@ -244,15 +251,17 @@ public class FrontendProto extends GenericProtocol {
             sendPeerWriteMessage(new PeerWriteMessage(batch), writesTo);
         }
 
-        if (!readBatchBuffer.isEmpty()) {
-            long internalId = nextId();
-            List<Pair<Host, Integer>> opIds = new ArrayList<>(readBatchBuffer.size());
-            List<byte[]> ops = new ArrayList<>(readBatchBuffer.size());
-            readBatchBuffer.forEach(p -> {
+        while (!readBatchBuffer.isEmpty()) {
+            List<Pair<Host, Integer>> opIds = new LinkedList<>();
+            List<byte[]> ops = new LinkedList<>();
+            int batchSize = 0;
+            while (batchSize + 1100 < MAX_BATCH_SIZE && !readBatchBuffer.isEmpty()) {
+                Pair<Host, RequestMessage> p = readBatchBuffer.remove();
                 opIds.add(Pair.of(p.getLeft(), p.getRight().getOpId()));
                 ops.add(p.getRight().getPayload());
-            });
-            readBatchBuffer.clear();
+                batchSize += p.getRight().getPayload().length;
+            }
+            long internalId = nextId();
             List<Pair<Host, Integer>> put = idMapper.put(internalId, opIds);
             if (put != null) {
                 logger.error("Duplicate internalId");
@@ -261,7 +270,6 @@ public class FrontendProto extends GenericProtocol {
             OpBatch batch = new OpBatch(internalId, self, ops);
             pendingReads.put(internalId, batch);
             sendPeerReadMessage(new PeerReadMessage(batch), readsTo);
-
         }
     }
 

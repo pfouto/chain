@@ -14,6 +14,7 @@ public class GraphNode {
     public int lowLink;
 
     public GraphNode(Host replica, int iN) {
+        if(replica == null) throw new AssertionError("replica null");
         this.replica = replica;
         this.iN = iN;
         onStack = false;

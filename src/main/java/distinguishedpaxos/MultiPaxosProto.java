@@ -4,18 +4,15 @@ import babel.events.MessageInEvent;
 import babel.exceptions.HandlerRegistrationException;
 import babel.generic.GenericProtocol;
 import babel.generic.ProtoMessage;
+import channel.tcp.MultithreadedTCPChannel;
+import channel.tcp.events.*;
+import common.values.AppOpBatch;
 import common.values.NoOpValue;
 import common.values.PaxosValue;
-import distinguishedpaxos.timers.*;
-import channel.tcp.events.*;
 import distinguishedpaxos.messages.*;
-import channel.tcp.MultithreadedTCPChannel;
-import common.values.AppOpBatch;
-import distinguishedpaxos.messages.AcceptMsg;
-import distinguishedpaxos.messages.DecidedMsg;
-import distinguishedpaxos.messages.PrepareMsg;
-import distinguishedpaxos.messages.PrepareOkMsg;
 import distinguishedpaxos.timers.LeaderTimer;
+import distinguishedpaxos.timers.NoOpTimer;
+import distinguishedpaxos.timers.ReconnectTimer;
 import distinguishedpaxos.utils.AcceptedValue;
 import distinguishedpaxos.utils.InstanceState;
 import distinguishedpaxos.utils.Membership;
@@ -34,14 +31,14 @@ import java.net.UnknownHostException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class DistinguishedPaxosProto extends GenericProtocol {
+public class MultiPaxosProto extends GenericProtocol {
 
-    private static final Logger logger = LogManager.getLogger(DistinguishedPaxosProto.class);
+    private static final Logger logger = LogManager.getLogger(MultiPaxosProto.class);
 
     public final static short PROTOCOL_ID = 400;
     public final static String PROTOCOL_NAME = "DistPaxos";
 
-    public static final String[] SUPPORTED_CONSISTENCIES = {"pcs", "serial"};
+    public static final String[] SUPPORTED_CONSISTENCIES = {"pcs"};
 
     private static final int INITIAL_MAP_SIZE = 1000;
     private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
@@ -90,7 +87,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
 
     private int peerChannel;
 
-    public DistinguishedPaxosProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
+    public MultiPaxosProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME, PROTOCOL_ID);
         this.workerGroup = workerGroup;
 
@@ -377,7 +374,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         assert instance.acceptedValue != null;
         assert instance.highestAccept != null;
 
-        sendOrEnqueue(new AcceptedMsg(msg.iN, msg.sN, msg.value), from);
+        membership.getMembers().forEach(m -> sendOrEnqueue(new AcceptedMsg(msg.iN, msg.sN, msg.value), m));
         lastLeaderOp = System.currentTimeMillis();
     }
 
@@ -429,10 +426,8 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         while (instance.isPeerDecided() || instance.getAccepteds() >= QUORUM_SIZE) {
             assert !instance.isDecided();
             decideAndExecute(instance);
-            if (instance.highestAccept.getNode().equals(self)) {
-                DecisionMsg dMsg = new DecisionMsg(instance.iN, instance.highestAccept, instance.acceptedValue);
-                membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(h -> sendOrEnqueue(dMsg, h));
-            }
+            DecisionMsg dMsg = new DecisionMsg(instance.iN, instance.highestAccept, instance.acceptedValue);
+            membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(h -> sendOrEnqueue(dMsg, h));
             instance = instances.computeIfAbsent(highestDecidedInstance + 1, InstanceState::new);
         }
     }
@@ -452,6 +447,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
             logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
             throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
         }
+        //Resubmit timed out ops
     }
 
     void sendOrEnqueue(ProtoMessage msg, Host destination) {
@@ -510,7 +506,7 @@ public class DistinguishedPaxosProto extends GenericProtocol {
         logger.info(event);
     }
 
-    private void triggerMembershipChangeNotification(){
+    private void triggerMembershipChangeNotification() {
         triggerNotification(new MembershipChange(
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                 readsTo(),
@@ -518,11 +514,9 @@ public class DistinguishedPaxosProto extends GenericProtocol {
                 null));
     }
 
-    private InetAddress readsTo(){
-        if(CONSISTENCY.equals("pcs")){
+    private InetAddress readsTo() {
+        if (CONSISTENCY.equals("pcs")) {
             return self.getAddress();
-        } else if (CONSISTENCY.equals("serial")){
-            return supportedLeader().getAddress();
         } else {
             logger.error("Unexpected consistency " + CONSISTENCY);
             throw new AssertionError("Unexpected consistency " + CONSISTENCY);
