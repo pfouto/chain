@@ -28,7 +28,7 @@ public class PrepareOkMsg extends ProtoMessage {
         return "PrepareOkMsg{" +
                 "iN=" + iN +
                 ", sN=" + sN +
-                ", acceptedValues=" + acceptedValues +
+                ", acceptedValues=" + acceptedValues.size() +
                 '}';
     }
 

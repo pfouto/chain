@@ -30,7 +30,7 @@ public class DecidedMsg extends ProtoMessage {
         return "DecidedMsg{" +
                 "iN=" + iN +
                 ", sN=" + sN +
-                ", decidedValues=" + decidedValues +
+                ", decidedValues=" + decidedValues.size() +
                 '}';
     }
 

@@ -215,6 +215,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
                 sendNextAccept(new NoOpValue());
         } else {
             logger.warn(timer + " while not quorumLeader");
+            cancelTimer(timerId);
             cancelTimer(noOpTimer);
         }
     }
@@ -407,7 +408,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
             return;
         }
         if (msg.sN.lesserThan(currentSN.getValue())) {
-            logger.warn("Discarding accept since sN < hP: " + msg);
+            logger.debug("Discarding accept since sN < hP: " + msg);
             return;
         }
         if (msg.sN.greaterThan(currentSN.getValue()))
