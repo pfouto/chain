@@ -10,17 +10,17 @@ public class MembershipChange extends ProtoNotification {
     public final static short NOTIFICATION_ID = 102;
 
     private final List<InetAddress> orderedMembers;
-    private final InetAddress readsTo;
     private final InetAddress writesTo;
-    private final InetAddress responder;
+    private final InetAddress readsTo;
+    private final InetAddress writeResponder;
 
     public MembershipChange(List<InetAddress> orderedMembers, InetAddress readsTo,
-                            InetAddress writesTo, InetAddress responder) {
+                            InetAddress writesTo, InetAddress writeResponder) {
         super(NOTIFICATION_ID);
         this.orderedMembers = orderedMembers;
         this.readsTo = readsTo;
         this.writesTo = writesTo;
-        this.responder = responder;
+        this.writeResponder = writeResponder;
     }
 
     public InetAddress getReadsTo() {
@@ -31,7 +31,9 @@ public class MembershipChange extends ProtoNotification {
         return writesTo;
     }
 
-    public InetAddress getResponder() { return responder; }
+    public InetAddress getWriteResponder() {
+        return writeResponder;
+    }
 
     public List<InetAddress> getOrderedMembers() {
         return orderedMembers;

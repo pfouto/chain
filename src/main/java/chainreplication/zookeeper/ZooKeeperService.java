@@ -19,6 +19,7 @@ class ZooKeeperService {
     }
 
     String createNode(final String node, byte[] data, final boolean watch, final boolean ephemeral) {
+
         String createdNodePath;
         try {
             final Stat nodeStat = zooKeeper.exists(node, watch);

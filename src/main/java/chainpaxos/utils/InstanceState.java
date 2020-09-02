@@ -2,11 +2,10 @@ package chainpaxos.utils;
 
 
 import common.values.PaxosValue;
+import frontend.ops.ReadOp;
 import network.data.Host;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class InstanceState {
 
@@ -19,6 +18,8 @@ public class InstanceState {
 
     public Map<SeqN, Set<Host>> prepareResponses;
 
+    private Queue<ReadOp> attachedReads;
+
     public InstanceState(int iN) {
         this.iN = iN;
         this.highestAccept = null;
@@ -26,6 +27,7 @@ public class InstanceState {
         this.counter = 0;
         this.decided = false;
         this.prepareResponses = new HashMap<>();
+        this.attachedReads = new LinkedList<>();
     }
 
     @Override
@@ -38,6 +40,15 @@ public class InstanceState {
                 ", decided=" + decided +
                 ", prepareResponses=" + prepareResponses +
                 '}';
+    }
+
+    public void attachRead(ReadOp op) {
+        if(decided) throw new IllegalStateException();
+        attachedReads.add(op);
+    }
+
+    public Queue<ReadOp> getAttachedReads() {
+        return attachedReads;
     }
 
     //If it is already decided by some node, or received from prepareOk

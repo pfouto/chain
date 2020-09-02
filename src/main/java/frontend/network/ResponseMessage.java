@@ -8,9 +8,6 @@ public class ResponseMessage extends ProtoMessage {
 
     public static final short MSG_CODE = 102;
 
-    public static final byte READ = 0;
-    public static final byte WRITE = 1;
-
     private final int opId;
     private final byte opType;
     private final byte[] response;
@@ -30,7 +27,7 @@ public class ResponseMessage extends ProtoMessage {
         return response;
     }
 
-    public short getOpType() {
+    public byte getOpType() {
         return opType;
     }
 

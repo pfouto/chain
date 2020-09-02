@@ -5,7 +5,10 @@ import babel.exceptions.HandlerRegistrationException;
 import babel.exceptions.InvalidParameterException;
 import babel.exceptions.ProtocolAlreadyExistsException;
 import babel.generic.GenericProtocol;
-import chainpaxos.ChainPaxosProto;
+import chainpaxos.ChainPaxosDelayedFrontend;
+import chainpaxos.ChainPaxosDelayedProto;
+import chainpaxos.ChainPaxosMixedFrontend;
+import chainpaxos.ChainPaxosMixedProto;
 import chainreplication.ChainReplicationProto;
 import distinguishedpaxos.DistinguishedPaxosProto;
 import distinguishedpaxos.MultiPaxosProto;
@@ -34,16 +37,15 @@ public class Main {
     public static void main(String[] args) throws IOException, InvalidParameterException,
             HandlerRegistrationException, ProtocolAlreadyExistsException {
 
-
         Babel babel = Babel.getInstance();
         Properties configProps = babel.loadConfig(args[0], Arrays.copyOfRange(args, 2, args.length));
 
         logger.debug(configProps);
-        if(configProps.containsKey("interface")){
+        if (configProps.containsKey("interface")) {
             String address = getAddress(configProps.getProperty("interface"));
-            if(address == null) return;
+            if (address == null) return;
             configProps.setProperty(FrontendProto.ADDRESS_KEY, address);
-            configProps.setProperty(ChainPaxosProto.ADDRESS_KEY, address);
+            configProps.setProperty(ChainPaxosMixedProto.ADDRESS_KEY, address);
         }
         //translate interface name to address
 
@@ -51,23 +53,27 @@ public class Main {
 
         String alg = args[1];
 
-        FrontendProto frontendProto = new FrontendProto(configProps, workerGroup);
+        FrontendProto frontendProto = null;
         GenericProtocol consensusProto;
-        if(alg.equals("chain"))
-            consensusProto = new ChainPaxosProto(configProps, workerGroup);
-        else if(alg.equals("chainrep"))
+        if (alg.startsWith("chain_mixed")) {
+            frontendProto = new ChainPaxosMixedFrontend(configProps, workerGroup);
+            consensusProto = new ChainPaxosMixedProto(configProps, workerGroup);
+        } else if (alg.startsWith("chain_delayed")) {
+            frontendProto = new ChainPaxosDelayedFrontend(configProps, workerGroup);
+            consensusProto = new ChainPaxosDelayedProto(configProps, workerGroup);
+        } else if (alg.startsWith("chainrep")) {
             consensusProto = new ChainReplicationProto(configProps, workerGroup);
-        else if(alg.equals("distinguished"))
+        } else if (alg.startsWith("distinguished")) {
             consensusProto = new DistinguishedPaxosProto(configProps, workerGroup);
-        else if(alg.equals("multi"))
+        } else if (alg.startsWith("multi")) {
             consensusProto = new MultiPaxosProto(configProps, workerGroup);
-        else if(alg.equals("epaxos"))
+        } else if (alg.startsWith("epaxos")) {
             consensusProto = new EPaxosProto(configProps, workerGroup);
-        else if(alg.equals("esolatedpaxos"))
+        } else if (alg.startsWith("esolatedpaxos")) {
             consensusProto = new EsolatedPaxosProto(configProps, workerGroup);
-        else if(alg.equals("ring"))
+        } else if (alg.startsWith("ring")) {
             consensusProto = new RingPaxosProto(configProps, workerGroup);
-        else {
+        } else {
             logger.error("Unknown algorithm: " + alg);
             return;
         }
@@ -83,7 +89,7 @@ public class Main {
 
     private static String getAddress(String inter) throws SocketException {
         NetworkInterface byName = NetworkInterface.getByName(inter);
-        if(byName == null) {
+        if (byName == null) {
             logger.error("No interface named " + inter);
             return null;
         }

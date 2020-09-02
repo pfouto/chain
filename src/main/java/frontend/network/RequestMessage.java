@@ -8,8 +8,9 @@ public class RequestMessage extends ProtoMessage {
 
     public static final short MSG_CODE = 101;
 
-    public static final byte READ = 0;
-    public static final byte WRITE = 1;
+    public static final byte READ_WEAK = 0;
+    public static final byte READ_STRONG = 1;
+    public static final byte WRITE = 2;
 
     private final int opId;
     private final byte opType;
@@ -30,7 +31,7 @@ public class RequestMessage extends ProtoMessage {
         return payload;
     }
 
-    public short getOpType() {
+    public byte getOpType() {
         return opType;
     }
 

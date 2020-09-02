@@ -8,14 +8,10 @@ import channel.simpleclientserver.events.ClientDownEvent;
 import channel.simpleclientserver.events.ClientUpEvent;
 import channel.tcp.MultithreadedTCPChannel;
 import channel.tcp.events.*;
-import frontend.ops.ReadOp;
-import frontend.ops.OpBatch;
-import frontend.notifications.*;
 import frontend.network.*;
-import frontend.timers.BatchTimer;
+import frontend.notifications.*;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -24,90 +20,55 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.*;
+import java.util.List;
+import java.util.Properties;
 
-public class FrontendProto extends GenericProtocol {
+public abstract class FrontendProto extends GenericProtocol {
 
     private static final Logger logger = LogManager.getLogger(FrontendProto.class);
-
-    public final static short PROTOCOL_ID = 100;
-    public final static String PROTOCOL_NAME = "Frontend";
 
     public static final String ADDRESS_KEY = "frontend_address";
     public static final String PEER_PORT_KEY = "frontend_peer_port";
     public static final String SERVER_PORT_KEY = "frontend_server_port";
-    public static final String READ_RESPONSE_BYTES_KEY = "read_response_bytes";
-    public static final String BATCH_INTERVAL_KEY = "batch_interval";
-    public static final String MAX_BATCH_SIZE_KEY = "max_batch_bytes";
 
-    private final int READ_RESPONSE_BYTES;
-    private final int PEER_PORT;
-    private final int BATCH_INTERVAL;
-    private final int MAX_BATCH_SIZE;
-
-    private final InetAddress self;
-    private int serverChannel;
-    private int peerChannel;
-
-    private List<InetAddress> membership;
-    private Host readsTo;
-    private Host writesTo;
-    private InetAddress responder;
 
     private final int opPrefix;
     private int opCounter;
 
-    private final Map<Long, List<Pair<Host, Integer>>> idMapper;
+    private final EventLoopGroup workerGroup;
 
-    //ToForward
-    private final Queue<Pair<Host, RequestMessage>> writeBatchBuffer;
-    private final Queue<Pair<Host, RequestMessage>> readBatchBuffer;
-    //Forwarded
-    private final Map<Long, OpBatch> pendingReads;
-    private final Map<Long, OpBatch> pendingWrites;
+    protected final int PEER_PORT;
+
+    protected final InetAddress self;
+    protected int serverChannel;
+    protected int peerChannel;
+
+    protected List<InetAddress> membership;
 
     //App state
     private int nWrites;
     private byte[] incrementalHash;
 
-    private final EventLoopGroup workerGroup;
+    public FrontendProto(String protocolName, short protocolId, Properties props, EventLoopGroup workerGroup)
+            throws IOException {
+        super(protocolName, protocolId);
 
-    private final byte[] response;
-
-    public FrontendProto(Properties props, EventLoopGroup workerGroup) throws IOException {
-        super(PROTOCOL_NAME, PROTOCOL_ID);
-
-        this.READ_RESPONSE_BYTES = Integer.parseInt(props.getProperty(READ_RESPONSE_BYTES_KEY));
         this.PEER_PORT = Integer.parseInt(props.getProperty(PEER_PORT_KEY));
-        this.BATCH_INTERVAL = Integer.parseInt(props.getProperty(BATCH_INTERVAL_KEY));
-        int maxBatchSize = Integer.parseInt(props.getProperty(MAX_BATCH_SIZE_KEY));
-        MAX_BATCH_SIZE = maxBatchSize <= 0 ? Integer.MAX_VALUE : maxBatchSize;
 
         this.workerGroup = workerGroup;
         self = InetAddress.getByName(props.getProperty(ADDRESS_KEY));
         opPrefix = ByteBuffer.wrap(self.getAddress()).getInt();
-        response = new byte[READ_RESPONSE_BYTES];
         opCounter = 0;
-        responder = null;
-        readsTo = null;
-        writesTo = null;
-        writeBatchBuffer = new LinkedList<>();
-        readBatchBuffer = new LinkedList<>();
-        pendingReads = new HashMap<>();
-        pendingWrites = new HashMap<>();
-        idMapper = new HashMap<>();
         membership = null;
 
         nWrites = 0;
         incrementalHash = new byte[0];
+
     }
 
     @SuppressWarnings("DuplicatedCode")
     @Override
     public void init(Properties props) throws HandlerRegistrationException, IOException {
-        setupPeriodicTimer(new BatchTimer(), BATCH_INTERVAL, BATCH_INTERVAL);
-        registerTimerHandler(BatchTimer.TIMER_ID, this::handleBatchTimer);
-
         //Server
         Properties serverProps = new Properties();
         serverProps.put(SimpleServerChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
@@ -117,7 +78,7 @@ public class FrontendProto extends GenericProtocol {
         registerMessageSerializer(RequestMessage.MSG_CODE, RequestMessage.serializer);
         registerMessageSerializer(ResponseMessage.MSG_CODE, ResponseMessage.serializer);
         registerMessageHandler(serverChannel, RequestMessage.MSG_CODE, this::onRequestMessage);
-        registerMessageHandler(serverChannel, ResponseMessage.MSG_CODE, null, this::onReplyMessageFail);
+        registerMessageHandler(serverChannel, ResponseMessage.MSG_CODE, null, this::onResponseMessageFail);
         registerChannelEventHandler(serverChannel, ClientUpEvent.EVENT_ID, this::onClientUp);
         registerChannelEventHandler(serverChannel, ClientDownEvent.EVENT_ID, this::onClientDown);
 
@@ -148,21 +109,24 @@ public class FrontendProto extends GenericProtocol {
         //Consensus
         subscribeNotification(MembershipChange.NOTIFICATION_ID, this::onMembershipChange);
         subscribeNotification(ExecuteBatchNotification.NOTIFICATION_ID, this::onExecuteBatch);
+        subscribeNotification(ExecuteReadNotification.NOTIFICATION_ID, this::onExecuteRead);
         subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
         subscribeNotification(GetSnapshotNotification.NOTIFICATION_ID, this::onGetStateSnapshot);
-
+        _init(props);
     }
 
-    private long nextId() {
+    protected abstract void _init(Properties props) throws HandlerRegistrationException;
+
+    protected long nextId() {
         //Message id is constructed using the server ip and a local counter (makes it unique and sequential)
         //TODO test if results in incrementing ids
         opCounter++;
         return ((long) opCounter << 32) | (opPrefix & 0xFFFFFFFFL);
     }
 
-    /* -------------------- ---------- ----------------------------------------------- */
-    /* -------------------- CLIENT OPS ----------------------------------------------- */
-    /* -------------------- ---------- ----------------------------------------------- */
+    /* ---------------------------------------------- ---------- ---------------------------------------------- */
+    /* ---------------------------------------------- CLIENT OPS ---------------------------------------------- */
+    /* ---------------------------------------------- ---------- ---------------------------------------------- */
 
     private void onClientUp(ClientUpEvent event, int channel) {
         logger.debug(event);
@@ -172,155 +136,31 @@ public class FrontendProto extends GenericProtocol {
         logger.debug(event);
     }
 
-    private void onRequestMessage(RequestMessage msg, Host from, short sProto, int channel) {
-        if (msg.getOpType() == RequestMessage.READ) {
-            readBatchBuffer.add(Pair.of(from, msg));
-        } else {
-            writeBatchBuffer.add(Pair.of(from, msg));
-        }
-    }
+    protected abstract void onRequestMessage(RequestMessage msg, Host from, short sProto, int channel);
 
-    private void onReplyMessageFail(ResponseMessage message, Host host, short dProto, Throwable cause, int channel) {
+    private void onResponseMessageFail(ResponseMessage message, Host host, short dProto, Throwable cause, int channel) {
         logger.warn(message + " failed to " + host + " - " + cause);
     }
 
-    /* -------------------- -------- ----------------------------------------------- */
-    /* -------------------- PEER OPS ----------------------------------------------- */
-    /* -------------------- -------- ----------------------------------------------- */
+    /* ----------------------------------------------- -------- ----------------------------------------------- */
+    /* ----------------------------------------------- PEER OPS ----------------------------------------------- */
+    /* ----------------------------------------------- -------- ----------------------------------------------- */
 
-    private void onPeerReadMessage(PeerReadMessage msg, Host from, short sProto, int channel) {
-        if (!readsTo.getAddress().equals(self)) return;
+    protected abstract void onPeerReadMessage(PeerReadMessage msg, Host from, short sProto, int channel);
 
-        int nOps = msg.getBatch().getOps().size();
-        List<byte[]> responses = new ArrayList<>(nOps);
-        for (int i = 0; i < nOps; i++) {
-            responses.add(response);
-        }
-        sendPeerReadResponseMessage(new PeerReadResponseMessage(
-                new OpBatch(msg.getBatch().getBatchId(), msg.getBatch().getIssuer(), responses)), from);
-    }
+    protected abstract void onPeerReadResponseMessage(PeerReadResponseMessage msg,
+                                                      Host from, short sProto, int channel);
 
-    private void onPeerReadResponseMessage(PeerReadResponseMessage msg, Host from, short sProto, int channel) {
-        List<Pair<Host, Integer>> ops = idMapper.remove(msg.getResponses().getBatchId());
-        if (ops == null) {
-            logger.error("No entry in idMapper");
-            throw new AssertionError("No entry in idMapper");
-        }
+    protected abstract void onPeerWriteResponseMessage(PeerWriteResponseMessage msg,
+                                                       Host from, short sProto, int channel);
 
-        for (int i = 0; i < ops.size(); i++) {
-            Pair<Host, Integer> pair = ops.get(i);
-            sendMessage(serverChannel, new ResponseMessage(pair.getValue(),
-                    RequestMessage.READ, msg.getResponses().getOps().get(i)), pair.getKey());
-        }
-    }
+    protected abstract void onPeerWriteMessage(PeerWriteMessage msg, Host from, short sProto, int channel);
 
-    private void onPeerWriteResponseMessage(PeerWriteResponseMessage msg, Host from, short sProto, int channel) {
-        List<Pair<Host, Integer>> ops = idMapper.remove(msg.getBatchId());
-        if (ops == null) {
-            logger.error("No entry in idMapper");
-            throw new AssertionError("No entry in idMapper");
-        }
-        ops.forEach(p -> sendMessage(serverChannel, new ResponseMessage(p.getValue(),
-                RequestMessage.WRITE, new byte[0]), p.getKey()));
-    }
+    protected abstract void onOutConnectionUp(OutConnectionUp event, int channel);
 
-    private void onPeerWriteMessage(PeerWriteMessage msg, Host from, short sProto, int channel) {
-        triggerNotification(new SubmitBatchNotification(msg.getBatch()));
-    }
+    protected abstract void onOutConnectionDown(OutConnectionDown event, int channel);
 
-    private void handleBatchTimer(BatchTimer timer, long l) {
-
-        while (!writeBatchBuffer.isEmpty()) {
-            List<Pair<Host, Integer>> opIds = new LinkedList<>();
-            List<byte[]> ops = new LinkedList<>();
-            int batchSize = 0;
-            while (batchSize + 1100 < MAX_BATCH_SIZE && !writeBatchBuffer.isEmpty()) {
-                Pair<Host, RequestMessage> p = writeBatchBuffer.remove();
-                opIds.add(Pair.of(p.getLeft(), p.getRight().getOpId()));
-                ops.add(p.getRight().getPayload());
-                batchSize += p.getRight().getPayload().length;
-            }
-            long internalId = nextId();
-            List<Pair<Host, Integer>> put = idMapper.put(internalId, opIds);
-            if (put != null) {
-                logger.error("Duplicate internalId");
-                throw new AssertionError("Duplicate internalId");
-            }
-            OpBatch batch = new OpBatch(internalId, self, ops);
-            pendingWrites.put(internalId, batch);
-            sendPeerWriteMessage(new PeerWriteMessage(batch), writesTo);
-        }
-
-        while (!readBatchBuffer.isEmpty()) {
-            List<Pair<Host, Integer>> opIds = new LinkedList<>();
-            List<byte[]> ops = new LinkedList<>();
-            int batchSize = 0;
-            while (batchSize + 1100 < MAX_BATCH_SIZE && !readBatchBuffer.isEmpty()) {
-                Pair<Host, RequestMessage> p = readBatchBuffer.remove();
-                opIds.add(Pair.of(p.getLeft(), p.getRight().getOpId()));
-                ops.add(p.getRight().getPayload());
-                batchSize += p.getRight().getPayload().length;
-            }
-            long internalId = nextId();
-            List<Pair<Host, Integer>> put = idMapper.put(internalId, opIds);
-            if (put != null) {
-                logger.error("Duplicate internalId");
-                throw new AssertionError("Duplicate internalId");
-            }
-            OpBatch batch = new OpBatch(internalId, self, ops);
-            pendingReads.put(internalId, batch);
-            sendPeerReadMessage(new PeerReadMessage(batch), readsTo);
-        }
-    }
-
-    private void onOutConnectionUp(OutConnectionUp event, int channel) {
-        //logger.info(event);
-        Host peer = event.getNode();
-        if (peer.equals(writesTo)) {
-            logger.debug("Connected to writesTo " + peer);
-        } else if (peer.equals(readsTo)) {
-            logger.debug("Connected to readsTo " + peer);
-        } else if (!responder.equals(self)) {
-            logger.warn("Unexpected connectionUp, ignoring and closing: " + event);
-            closeConnection(peer, peerChannel);
-        }
-    }
-
-    private void onOutConnectionDown(OutConnectionDown event, int channel) {
-        //logger.info(event);
-        Host peer = event.getNode();
-        if (peer.equals(writesTo)) {
-            logger.warn("Lost connection to writesTo, re-connecting: " + event);
-            connectAndSendPendingToWritesTo();
-        } else if (peer.equals(readsTo)) {
-            logger.warn("Lost connection to readsTo, re-connecting: " + event);
-            connectAndSendPendingToReadsTo();
-        }
-    }
-
-    private void onOutConnectionFailed(OutConnectionFailed<Void> event, int channel) {
-        logger.info(event);
-        Host peer = event.getNode();
-        if (peer.equals(writesTo)) {
-            logger.warn("Connection failed to writesTo, re-trying: " + event);
-            connectAndSendPendingToWritesTo();
-        } else if (peer.equals(readsTo)) {
-            logger.warn("Connection failed to readsTo, re-trying: " + event);
-            connectAndSendPendingToReadsTo();
-        }
-    }
-
-    private void connectAndSendPendingToWritesTo() {
-        if (!writesTo.getAddress().equals(self))
-            openConnection(writesTo, peerChannel);
-        pendingWrites.values().forEach(b -> sendPeerWriteMessage(new PeerWriteMessage(b), writesTo));
-    }
-
-    private void connectAndSendPendingToReadsTo() {
-        if (!readsTo.getAddress().equals(self))
-            openConnection(readsTo, peerChannel);
-        pendingReads.values().forEach(r -> sendPeerReadMessage(new PeerReadMessage(r), readsTo));
-    }
+    protected abstract void onOutConnectionFailed(OutConnectionFailed<Void> event, int channel);
 
     private void onInConnectionDown(InConnectionDown event, int channel) {
         logger.debug(event);
@@ -330,33 +170,9 @@ public class FrontendProto extends GenericProtocol {
         logger.debug(event);
     }
 
-    private void sendPeerWriteMessage(PeerWriteMessage msg, Host destination) {
-        if (destination.getAddress().equals(self)) onPeerWriteMessage(msg, destination, getProtoId(), peerChannel);
-        else sendMessage(peerChannel, msg, destination);
-    }
-
-    private void sendPeerReadMessage(PeerReadMessage msg, Host destination) {
-        if (destination.getAddress().equals(self)) onPeerReadMessage(msg, destination, getProtoId(), peerChannel);
-        else sendMessage(peerChannel, msg, destination);
-    }
-
-    private void sendPeerReadResponseMessage(PeerReadResponseMessage msg, Host destination) {
-        if (destination.getAddress().equals(self))
-            onPeerReadResponseMessage(msg, destination, getProtoId(), peerChannel);
-        else sendMessage(peerChannel, msg, destination, MultithreadedTCPChannel.CONNECTION_IN);
-    }
-
-    private void sendPeerWriteResponseMessage(PeerWriteResponseMessage msg, Host destination) {
-        if (destination.getAddress().equals(self)) {
-            onPeerWriteResponseMessage(msg, destination, getProtoId(), peerChannel);
-        } else {
-            sendMessage(peerChannel, msg, destination);
-        }
-    }
-
-    /* -------------------- ------------- ----------------------------------------------- */
-    /* -------------------- CONSENSUS OPS ----------------------------------------------- */
-    /* -------------------- ------------- ----------------------------------------------- */
+    /* ------------------------------------------- ------------- ------------------------------------------- */
+    /* ------------------------------------------- CONSENSUS OPS ------------------------------------------- */
+    /* ------------------------------------------- ------------- ------------------------------------------- */
 
     private void onInstallSnapshot(InstallSnapshotNotification not, short from) {
         try {
@@ -395,65 +211,26 @@ public class FrontendProto extends GenericProtocol {
         }
     }
 
-    int counter = 0;
-
+    //int counter = 0;
     private void onExecuteBatch(ExecuteBatchNotification reply, short from) {
         //counter++;
         //if(counter % 10000 == 0)
         //    logger.info("State: " + Arrays.toString(incrementalHash));
         //incrementalHash = sha1(incrementalHash, reply.getBatch().getBatchId());
-
         nWrites += reply.getBatch().getOps().size();
-        if (self.equals(responder) || (responder == null && reply.getBatch().getIssuer().equals(self))) {
-            sendPeerWriteResponseMessage(new PeerWriteResponseMessage(reply.getBatch().getBatchId()),
-                    new Host(reply.getBatch().getIssuer(), PEER_PORT));
-        }
+
+        _onExecuteBatch(reply, from);
     }
 
-    private void onMembershipChange(MembershipChange notification, short emitterId) {
+    protected abstract void _onExecuteBatch(ExecuteBatchNotification reply, short from);
 
-        //Stopped being responder
-        if (self.equals(responder) && !notification.getResponder().equals(self)) {
-            //Close to everyone from old membership, except new writesTo and readsTo
-            membership.stream().filter(h ->
-                    !h.equals(self) && !h.equals(notification.getReadsTo()) && !h.equals(notification.getWritesTo()))
-                    .forEach(h -> closeConnection(new Host(h, PEER_PORT), peerChannel));
-        }
-        //update membership and responder
-        membership = notification.getOrderedMembers();
-        responder = notification.getResponder();
-
-        //Reads to changed
-        if (readsTo == null || !notification.getReadsTo().equals(readsTo.getAddress())) {
-            //Close old readsTo
-            if (readsTo != null && !readsTo.getAddress().equals(self))
-                closeConnection(readsTo, peerChannel);
-            //Update and open to new readsTo
-            readsTo = new Host(notification.getReadsTo(), PEER_PORT);
-            logger.info("New readsTo: " + readsTo.getAddress());
-            connectAndSendPendingToReadsTo();
-        }
-
-        //Writes to changed
-        if (writesTo == null || !notification.getWritesTo().equals(writesTo.getAddress())) {
-            //Close old writesTo
-            if (writesTo != null && !writesTo.getAddress().equals(self))
-                closeConnection(writesTo, peerChannel);
-            //Update and open to new writesTo
-            writesTo = new Host(notification.getWritesTo(), PEER_PORT);
-            logger.info("New writesTo: " + writesTo.getAddress());
-            connectAndSendPendingToWritesTo();
-        }
-
-        //Started being responder
-        if (self.equals(responder)) {
-            logger.info("Am responder.");
-            //Open to everyone except writesTo and readsTo (already open on previous step)
-            notification.getOrderedMembers().stream().
-                    filter(h -> !h.equals(self) && !h.equals(writesTo.getAddress()) && !h.equals(readsTo.getAddress())).
-                    forEach(h -> openConnection(new Host(h, PEER_PORT), peerChannel));
-        }
+    private void onExecuteRead(ExecuteReadNotification reply, short from) {
+        _onExecuteRead(reply, from);
     }
+
+    protected abstract void _onExecuteRead(ExecuteReadNotification reply, short from);
+
+    protected abstract void onMembershipChange(MembershipChange notification, short emitterId);
 
     //Utils
 

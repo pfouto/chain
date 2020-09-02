@@ -30,14 +30,12 @@ import java.net.UnknownHostException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class ChainPaxosProto extends GenericProtocol {
+public class ChainPaxosMixedProto extends GenericProtocol {
 
-    private static final Logger logger = LogManager.getLogger(ChainPaxosProto.class);
+    private static final Logger logger = LogManager.getLogger(ChainPaxosMixedProto.class);
 
     public final static short PROTOCOL_ID = 200;
     public final static String PROTOCOL_NAME = "ChainPaxos";
-
-    public static final String[] SUPPORTED_CONSISTENCIES = {"pcs", "serial"};
 
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
@@ -48,7 +46,6 @@ public class ChainPaxosProto extends GenericProtocol {
     public static final String INITIAL_STATE_KEY = "initial_state";
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
-    public static final String CONSISTENCY_KEY = "consistency";
 
     private final int LEADER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
@@ -57,8 +54,6 @@ public class ChainPaxosProto extends GenericProtocol {
 
     private final int STATE_TRANSFER_TIMEOUT;
     private final int JOIN_TIMEOUT;
-
-    private final String CONSISTENCY;
 
     enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
 
@@ -110,7 +105,7 @@ public class ChainPaxosProto extends GenericProtocol {
 
     private final EventLoopGroup workerGroup;
 
-    public ChainPaxosProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
+    public ChainPaxosMixedProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME, PROTOCOL_ID /*, new BetterEventPriorityQueue()*/);
 
         this.workerGroup = workerGroup;
@@ -130,12 +125,6 @@ public class ChainPaxosProto extends GenericProtocol {
 
         this.JOIN_TIMEOUT = Integer.parseInt(props.getProperty(JOIN_TIMEOUT_KEY));
         this.STATE_TRANSFER_TIMEOUT = Integer.parseInt(props.getProperty(STATE_TRANSFER_TIMEOUT_KEY));
-
-        this.CONSISTENCY = props.getProperty(CONSISTENCY_KEY);
-        if(!Arrays.asList(SUPPORTED_CONSISTENCIES).contains(CONSISTENCY)){
-            logger.error("Unsupported consistency: " + CONSISTENCY);
-            throw new AssertionError("Unsupported consistency: \" + CONSISTENCY");
-        }
 
         this.state = State.valueOf(props.getProperty(INITIAL_STATE_KEY));
         seeds = readSeeds(props.getProperty(INITIAL_MEMBERSHIP_KEY));
@@ -344,6 +333,7 @@ public class ChainPaxosProto extends GenericProtocol {
     private void uponPrepareMsg(PrepareMsg msg, Host from, short sourceProto, int channel) {
         logger.debug(msg + " : " + from);
         if (msg.iN > highestAcknowledgedInstance) {
+            
             assert msg.iN >= currentSN.getKey();
             if (!msg.sN.lesserOrEqualsThan(currentSN.getValue())) {
                 //Accept - Change leader
@@ -808,20 +798,6 @@ public class ChainPaxosProto extends GenericProtocol {
     private void triggerMembershipChangeNotification(){
         triggerNotification(new MembershipChange(
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                readsTo(),
-                supportedLeader().getAddress(),
-                null));
+                null, supportedLeader().getAddress(), null));
     }
-
-    private InetAddress readsTo(){
-        if(CONSISTENCY.equals("pcs")){
-            return self.getAddress();
-        } else if (CONSISTENCY.equals("serial")){
-            return membership.nodeAt(QUORUM_SIZE-1).getAddress();
-        } else {
-            logger.error("Unexpected consistency " + CONSISTENCY);
-            throw new AssertionError("Unexpected consistency " + CONSISTENCY);
-        }
-    }
-
 }
