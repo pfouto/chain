@@ -1,15 +1,15 @@
-package frontend.notifications;
+package chainreplication.notifications;
 
 import babel.generic.ProtoNotification;
 import frontend.ops.OpBatch;
 
-public class SubmitBatchNotification extends ProtoNotification {
+public class ReplyBatchNotification extends ProtoNotification {
 
-    public static final short NOTIFICATION_ID = 101;
+    public static final short NOTIFICATION_ID = 301;
 
     private final OpBatch batch;
 
-    public SubmitBatchNotification(OpBatch batch) {
+    public ReplyBatchNotification(OpBatch batch) {
         super(NOTIFICATION_ID);
         this.batch = batch;
     }

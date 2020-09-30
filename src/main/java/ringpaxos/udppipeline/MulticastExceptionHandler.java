@@ -17,6 +17,7 @@ public class MulticastExceptionHandler extends ChannelDuplexHandler {
             if (!future.isSuccess()) {
                 Throwable cause = future.cause();
                 cause.printStackTrace();
+                logger.error("Multicast write error: " + future.cause());
                 if (cause.getCause() instanceof AssertionError) {
                     cause.printStackTrace();
                     System.exit(1);

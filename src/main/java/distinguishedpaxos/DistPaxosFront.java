@@ -1,19 +1,21 @@
-package chainpaxos;
+package distinguishedpaxos;
 
 import babel.exceptions.HandlerRegistrationException;
 import channel.tcp.events.OutConnectionDown;
 import channel.tcp.events.OutConnectionFailed;
 import channel.tcp.events.OutConnectionUp;
 import frontend.FrontendProto;
+import frontend.ipc.SubmitBatchRequest;
 import frontend.network.*;
-import frontend.notifications.*;
+import frontend.notifications.ExecuteBatchNotification;
+import frontend.notifications.ExecuteReadReply;
+import frontend.notifications.MembershipChange;
 import frontend.ops.OpBatch;
-import frontend.ops.ReadOp;
 import frontend.timers.BatchTimer;
+import frontend.timers.InfoTimer;
 import frontend.utils.OpInfo;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -21,12 +23,12 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.util.*;
 
-public class ChainPaxosDelayedFrontend extends FrontendProto {
+public class DistPaxosFront extends FrontendProto {
 
-    private static final Logger logger = LogManager.getLogger(ChainPaxosDelayedFrontend.class);
+    private static final Logger logger = LogManager.getLogger(DistPaxosFront.class);
 
-    public final static short PROTOCOL_ID = 100;
-    public final static String PROTOCOL_NAME = "ChainFrontend";
+    public final static short PROTOCOL_ID_BASE = 100;
+    public final static String PROTOCOL_NAME_BASE = "DistFront_";
 
     public static final String READ_RESPONSE_BYTES_KEY = "read_response_bytes";
     public static final String BATCH_INTERVAL_KEY = "batch_interval";
@@ -38,19 +40,18 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
     private Host writesTo;
     private long lastBatchTime;
 
-
-    //ToForward writes
+    //ToForward
     private List<OpInfo> opInfoBuffer;
     private List<byte[]> opDataBuffer;
 
     //Forwarded
-    private final Queue<Triple<Long, List<OpInfo>, OpBatch>> pendingWrites;
-    private final Queue<Pair<Long, OpInfo>> pendingReads;
+    private final Queue<Triple<Long, List<OpInfo>, OpBatch>> pendingBatches;
 
     private final byte[] response;
 
-    public ChainPaxosDelayedFrontend(Properties props, EventLoopGroup workerGroup) throws IOException {
-        super(PROTOCOL_NAME, PROTOCOL_ID, props, workerGroup);
+    public DistPaxosFront(Properties props, EventLoopGroup workerGroup, short protoIndex) throws IOException {
+        super(PROTOCOL_NAME_BASE + protoIndex, (short) (PROTOCOL_ID_BASE + protoIndex),
+                props, workerGroup, protoIndex);
 
         this.BATCH_INTERVAL = Integer.parseInt(props.getProperty(BATCH_INTERVAL_KEY));
         this.BATCH_SIZE = Integer.parseInt(props.getProperty(BATCH_SIZE_KEY));
@@ -61,8 +62,7 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
         opInfoBuffer = new ArrayList<>(BATCH_SIZE);
         opDataBuffer = new ArrayList<>(BATCH_SIZE);
 
-        pendingWrites = new LinkedList<>();
-        pendingReads = new LinkedList<>();
+        pendingBatches = new LinkedList<>();
     }
 
     @Override
@@ -71,6 +71,10 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
         registerTimerHandler(BatchTimer.TIMER_ID, this::handleBatchTimer);
 
         lastBatchTime = System.currentTimeMillis();
+
+        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
+        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
+
     }
 
     /* -------------------- ---------- ----------------------------------------------- */
@@ -80,10 +84,6 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
     protected void onRequestMessage(RequestMessage msg, Host from, short sProto, int channel) {
         switch (msg.getOpType()) {
             case RequestMessage.READ_STRONG:
-                long internalId = nextId();
-                pendingReads.add(Pair.of(internalId, OpInfo.of(from, msg.getOpId(), msg.getOpType())));
-                triggerNotification(new SubmitReadNotification(new ReadOp(internalId, msg.getPayload())));
-                break;
             case RequestMessage.WRITE:
                 opInfoBuffer.add(OpInfo.of(from, msg.getOpId(), msg.getOpType()));
                 opDataBuffer.add(msg.getPayload());
@@ -114,7 +114,7 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
     }
 
     protected void onPeerWriteMessage(PeerWriteMessage msg, Host from, short sProto, int channel) {
-        triggerNotification(new SubmitBatchNotification(msg.getBatch()));
+        sendRequest(new SubmitBatchRequest(msg.getBatch()), DistPaxosProto.PROTOCOL_ID);
     }
 
     /* -------------------- -------- ----------------------------------------------- */
@@ -136,8 +136,8 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
     private void sendNewBatch() {
         long internalId = nextId();
 
-        OpBatch batch = new OpBatch(internalId, self, opDataBuffer);
-        pendingWrites.add(Triple.of(internalId, opInfoBuffer, batch));
+        OpBatch batch = new OpBatch(internalId, self, getProtoId(), opDataBuffer);
+        pendingBatches.add(Triple.of(internalId, opInfoBuffer, batch));
 
         opInfoBuffer = new ArrayList<>(BATCH_SIZE);
         opDataBuffer = new ArrayList<>(BATCH_SIZE);
@@ -149,7 +149,7 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
     protected void onOutConnectionUp(OutConnectionUp event, int channel) {
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
-            logger.info("Connected to writesTo " + event);
+            logger.debug("Connected to writesTo " + event);
         } else {
             logger.warn("Unexpected connectionUp, ignoring and closing: " + event);
             closeConnection(peer, peerChannel);
@@ -179,7 +179,7 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
     private void connectAndSendPendingBatchesToWritesTo() {
         if (!writesTo.getAddress().equals(self))
             openConnection(writesTo, peerChannel);
-        pendingWrites.forEach(b -> sendPeerWriteMessage(new PeerWriteMessage(b.getRight()), writesTo));
+        pendingBatches.forEach(b -> sendPeerWriteMessage(new PeerWriteMessage(b.getRight()), writesTo));
     }
 
     private void sendPeerWriteMessage(PeerWriteMessage msg, Host destination) {
@@ -191,30 +191,22 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
     /* -------------------- CONSENSUS OPS ----------------------------------------------- */
     /* -------------------- ------------- ----------------------------------------------- */
     protected void _onExecuteBatch(ExecuteBatchNotification not, short from) {
-        if (not.getBatch().getIssuer().equals(self)) {
-            Triple<Long, List<OpInfo>, OpBatch> ops = pendingWrites.poll();
+        if ((not.getBatch().getIssuer().equals(self)) && (not.getBatch().getFrontendId() == getProtoId())) {
+            Triple<Long, List<OpInfo>, OpBatch> ops = pendingBatches.poll();
             if (ops == null || ops.getLeft() != not.getBatch().getBatchId()) {
                 logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
                 throw new AssertionError("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
             }
-            ops.getMiddle().forEach(p -> sendMessage(serverChannel,
-                    new ResponseMessage(p.getOpId(), p.getOpType(), new byte[0]),
-                    p.getClient()));
+            ops.getMiddle().forEach(p -> sendMessage(serverChannel, p.getOpType() == RequestMessage.READ_STRONG ?
+                    new ResponseMessage(p.getOpId(), p.getOpType(), response) :
+                    new ResponseMessage(p.getOpId(), p.getOpType(), new byte[0]), p.getClient()));
         }
     }
 
-    protected void _onExecuteRead(ExecuteReadNotification not, short from) {
-        not.getOps().forEach(op -> {
-            Pair<Long, OpInfo> poll = pendingReads.poll();
-            if (poll == null || poll.getKey() != op.getOpId()) {
-                logger.error("Expected " + op.getOpId() + ". Got " + poll);
-                throw new AssertionError("Expected " + op.getOpId() + ". Got " + poll);
-            }
-            sendMessage(serverChannel,
-                    new ResponseMessage(poll.getRight().getOpId(), poll.getRight().getOpType(), response),
-                    poll.getRight().getClient());
-        });
+    protected void _onExecuteRead(ExecuteReadReply not, short from) {
+        throw new IllegalStateException();
     }
+
 
     protected void onMembershipChange(MembershipChange notification, short emitterId) {
 
@@ -232,5 +224,4 @@ public class ChainPaxosDelayedFrontend extends FrontendProto {
             connectAndSendPendingBatchesToWritesTo();
         }
     }
-
 }

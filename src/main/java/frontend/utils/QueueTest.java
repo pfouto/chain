@@ -38,8 +38,11 @@ public class QueueTest {
             }
             return po1 - po2;
         });
+        System.out.println(" JAVA B QUEUE: " + test(new Random(2000), javaBlockingQueue, N_ELEMS,1));
+        System.out.println(" JAVA B QUEUE: " + test(new Random(2000), javaBlockingQueue, N_ELEMS,2));
 
-        System.out.println(" ----- 1 Prod");
+
+        /*System.out.println(" ----- 1 Prod");
         System.out.println(" JAVA B QUEUE: " + test(new Random(2000), javaBlockingQueue, N_ELEMS,1));
         System.out.println(" AKOS QUEUE: " + test(new Random(2000), akosQueue, N_ELEMS,1));
         System.out.println(" BAKOS QUEUE: " + test(new Random(2000), bAkosQueue, N_ELEMS,1));
@@ -58,7 +61,7 @@ public class QueueTest {
         System.out.println(" JAVA B QUEUE: " + test(new Random(5000), javaBlockingQueue, N_ELEMS,100));
         System.out.println(" AKOS QUEUE: " + test(new Random(5000), akosQueue, N_ELEMS,100));
         System.out.println(" BAKOS QUEUE: " + test(new Random(5000), bAkosQueue, N_ELEMS,100));
-        System.out.println(" JAVA PB QUEUE: " + test(new Random(5000), javaPBlockingQueue, N_ELEMS,100));
+        System.out.println(" JAVA PB QUEUE: " + test(new Random(5000), javaPBlockingQueue, N_ELEMS,100));*/
     }
 
     private static long test(Random r, BlockingQueue<InternalEvent> q, int nElements, int nProducers) throws InterruptedException {

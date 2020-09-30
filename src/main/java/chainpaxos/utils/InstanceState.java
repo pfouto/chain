@@ -2,7 +2,7 @@ package chainpaxos.utils;
 
 
 import common.values.PaxosValue;
-import frontend.ops.ReadOp;
+import frontend.ipc.SubmitReadRequest;
 import network.data.Host;
 
 import java.util.*;
@@ -18,7 +18,7 @@ public class InstanceState {
 
     public Map<SeqN, Set<Host>> prepareResponses;
 
-    private Queue<ReadOp> attachedReads;
+    private Map<Short, Queue<Long>> attachedReads;
 
     public InstanceState(int iN) {
         this.iN = iN;
@@ -27,7 +27,7 @@ public class InstanceState {
         this.counter = 0;
         this.decided = false;
         this.prepareResponses = new HashMap<>();
-        this.attachedReads = new LinkedList<>();
+        this.attachedReads = new HashMap<>();
     }
 
     @Override
@@ -42,12 +42,12 @@ public class InstanceState {
                 '}';
     }
 
-    public void attachRead(ReadOp op) {
-        if(decided) throw new IllegalStateException();
-        attachedReads.add(op);
+    public void attachRead(SubmitReadRequest request) {
+        if (decided) throw new IllegalStateException();
+        attachedReads.computeIfAbsent(request.getFrontendId(), k -> new LinkedList<>()).add(request.getBatchId());
     }
 
-    public Queue<ReadOp> getAttachedReads() {
+    public Map<Short, Queue<Long>> getAttachedReads() {
         return attachedReads;
     }
 

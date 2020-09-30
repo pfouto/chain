@@ -6,8 +6,10 @@ import babel.generic.ProtoMessage;
 import channel.simpleclientserver.SimpleServerChannel;
 import channel.simpleclientserver.events.ClientDownEvent;
 import channel.simpleclientserver.events.ClientUpEvent;
-import channel.tcp.MultithreadedTCPChannel;
+import channel.tcp.TCPChannel;
 import channel.tcp.events.*;
+import frontend.ipc.DeliverSnapshotReply;
+import frontend.ipc.GetSnapshotRequest;
 import frontend.network.*;
 import frontend.notifications.*;
 import io.netty.channel.EventLoopGroup;
@@ -38,6 +40,7 @@ public abstract class FrontendProto extends GenericProtocol {
     private final EventLoopGroup workerGroup;
 
     protected final int PEER_PORT;
+    protected final int SERVER_PORT;
 
     protected final InetAddress self;
     protected int serverChannel;
@@ -49,11 +52,14 @@ public abstract class FrontendProto extends GenericProtocol {
     private int nWrites;
     private byte[] incrementalHash;
 
-    public FrontendProto(String protocolName, short protocolId, Properties props, EventLoopGroup workerGroup)
-            throws IOException {
+    private final short protoIndex;
+
+    public FrontendProto(String protocolName, short protocolId, Properties props,
+                         EventLoopGroup workerGroup, short protoIndex) throws IOException {
         super(protocolName, protocolId);
 
-        this.PEER_PORT = Integer.parseInt(props.getProperty(PEER_PORT_KEY));
+        this.PEER_PORT = Integer.parseInt(props.getProperty(PEER_PORT_KEY)) + protoIndex;
+        this.SERVER_PORT = Integer.parseInt(props.getProperty(SERVER_PORT_KEY)) + protoIndex;
 
         this.workerGroup = workerGroup;
         self = InetAddress.getByName(props.getProperty(ADDRESS_KEY));
@@ -63,7 +69,7 @@ public abstract class FrontendProto extends GenericProtocol {
 
         nWrites = 0;
         incrementalHash = new byte[0];
-
+        this.protoIndex = protoIndex;
     }
 
     @SuppressWarnings("DuplicatedCode")
@@ -72,11 +78,13 @@ public abstract class FrontendProto extends GenericProtocol {
         //Server
         Properties serverProps = new Properties();
         serverProps.put(SimpleServerChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        serverProps.put(SimpleServerChannel.PORT_KEY, props.getProperty(SERVER_PORT_KEY));
+        serverProps.put(SimpleServerChannel.PORT_KEY, SERVER_PORT);
         serverProps.put(SimpleServerChannel.WORKER_GROUP_KEY, workerGroup);
         serverChannel = createChannel(SimpleServerChannel.NAME, serverProps);
-        registerMessageSerializer(RequestMessage.MSG_CODE, RequestMessage.serializer);
-        registerMessageSerializer(ResponseMessage.MSG_CODE, ResponseMessage.serializer);
+        if (protoIndex == 0) {
+            registerMessageSerializer(RequestMessage.MSG_CODE, RequestMessage.serializer);
+            registerMessageSerializer(ResponseMessage.MSG_CODE, ResponseMessage.serializer);
+        }
         registerMessageHandler(serverChannel, RequestMessage.MSG_CODE, this::onRequestMessage);
         registerMessageHandler(serverChannel, ResponseMessage.MSG_CODE, null, this::onResponseMessageFail);
         registerChannelEventHandler(serverChannel, ClientUpEvent.EVENT_ID, this::onClientUp);
@@ -84,14 +92,17 @@ public abstract class FrontendProto extends GenericProtocol {
 
         //Peer
         Properties peerProps = new Properties();
-        peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(MultithreadedTCPChannel.PORT_KEY, props.getProperty(PEER_PORT_KEY));
-        peerProps.put(MultithreadedTCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerChannel = createChannel(MultithreadedTCPChannel.NAME, peerProps);
-        registerMessageSerializer(PeerReadMessage.MSG_CODE, PeerReadMessage.serializer);
-        registerMessageSerializer(PeerWriteMessage.MSG_CODE, PeerWriteMessage.serializer);
-        registerMessageSerializer(PeerReadResponseMessage.MSG_CODE, PeerReadResponseMessage.serializer);
-        registerMessageSerializer(PeerWriteResponseMessage.MSG_CODE, PeerWriteResponseMessage.serializer);
+        peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
+        peerProps.put(TCPChannel.PORT_KEY, PEER_PORT);
+
+        peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
+        peerChannel = createChannel(TCPChannel.NAME, peerProps);
+        if (protoIndex == 0) {
+            registerMessageSerializer(PeerReadMessage.MSG_CODE, PeerReadMessage.serializer);
+            registerMessageSerializer(PeerWriteMessage.MSG_CODE, PeerWriteMessage.serializer);
+            registerMessageSerializer(PeerReadResponseMessage.MSG_CODE, PeerReadResponseMessage.serializer);
+            registerMessageSerializer(PeerWriteResponseMessage.MSG_CODE, PeerWriteResponseMessage.serializer);
+        }
         registerMessageHandler(peerChannel, PeerReadMessage.MSG_CODE, this::onPeerReadMessage,
                 this::uponMessageFailed);
         registerMessageHandler(peerChannel, PeerReadResponseMessage.MSG_CODE, this::onPeerReadResponseMessage,
@@ -109,9 +120,9 @@ public abstract class FrontendProto extends GenericProtocol {
         //Consensus
         subscribeNotification(MembershipChange.NOTIFICATION_ID, this::onMembershipChange);
         subscribeNotification(ExecuteBatchNotification.NOTIFICATION_ID, this::onExecuteBatch);
-        subscribeNotification(ExecuteReadNotification.NOTIFICATION_ID, this::onExecuteRead);
+        registerReplyHandler(ExecuteReadReply.REPLY_ID, this::onExecuteRead);
         subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
-        subscribeNotification(GetSnapshotNotification.NOTIFICATION_ID, this::onGetStateSnapshot);
+        registerRequestHandler(GetSnapshotRequest.REQUEST_ID, this::onGetStateSnapshot);
         _init(props);
     }
 
@@ -192,7 +203,7 @@ public abstract class FrontendProto extends GenericProtocol {
         }
     }
 
-    public void onGetStateSnapshot(GetSnapshotNotification not, short from) {
+    public void onGetStateSnapshot(GetSnapshotRequest not, short from) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(baos);
@@ -203,8 +214,8 @@ public abstract class FrontendProto extends GenericProtocol {
             for (byte b : incrementalHash)
                 sb.append(Integer.toString((b & 0xff) + 0x100, 16).substring(1));
             logger.debug("State stored(" + nWrites + ") " + sb.toString());
-            triggerNotification(new DeliverSnapshotNotification(not.getSnapshotTarget(),
-                    not.getSnapshotInstance(), baos.toByteArray()));
+            sendReply(new DeliverSnapshotReply(not.getSnapshotTarget(),
+                    not.getSnapshotInstance(), baos.toByteArray()), from);
         } catch (IOException e) {
             logger.error(e.getMessage());
             throw new AssertionError();
@@ -224,11 +235,11 @@ public abstract class FrontendProto extends GenericProtocol {
 
     protected abstract void _onExecuteBatch(ExecuteBatchNotification reply, short from);
 
-    private void onExecuteRead(ExecuteReadNotification reply, short from) {
+    private void onExecuteRead(ExecuteReadReply reply, short from) {
         _onExecuteRead(reply, from);
     }
 
-    protected abstract void _onExecuteRead(ExecuteReadNotification reply, short from);
+    protected abstract void _onExecuteRead(ExecuteReadReply reply, short from);
 
     protected abstract void onMembershipChange(MembershipChange notification, short emitterId);
 

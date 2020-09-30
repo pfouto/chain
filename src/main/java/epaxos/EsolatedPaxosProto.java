@@ -4,6 +4,7 @@ import babel.exceptions.HandlerRegistrationException;
 import babel.generic.GenericProtocol;
 import babel.generic.ProtoMessage;
 import channel.tcp.MultithreadedTCPChannel;
+import channel.tcp.TCPChannel;
 import channel.tcp.events.*;
 import common.values.AppOpBatch;
 import common.values.PaxosValue;
@@ -14,7 +15,8 @@ import epaxos.utils.Instance;
 import epaxos.utils.Membership;
 import frontend.notifications.ExecuteBatchNotification;
 import frontend.notifications.MembershipChange;
-import frontend.notifications.SubmitBatchNotification;
+import frontend.ipc.SubmitBatchRequest;
+import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
 import org.apache.logging.log4j.LogManager;
@@ -37,20 +39,16 @@ public class EsolatedPaxosProto extends GenericProtocol {
     public final static short PROTOCOL_ID = 500;
     public final static String PROTOCOL_NAME = "EsolatedPaxos";
 
-    public static final String[] SUPPORTED_CONSISTENCIES = {"pcs"};
-
     private static final int INITIAL_MAP_SIZE = 1000;
 
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
     public static final String MAX_CONCURRENT_FAILS_KEY = "max_concurrent_fails";
-    public static final String CONSISTENCY_KEY = "consistency";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
 
     private final int MAX_CONCURRENT_FAILS;
     private final int RECONNECT_TIME;
-    private final String CONSISTENCY;
 
     private final Host self;
     private final Membership membership;
@@ -79,11 +77,6 @@ public class EsolatedPaxosProto extends GenericProtocol {
 
         RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
         MAX_CONCURRENT_FAILS = Integer.parseInt(props.getProperty(MAX_CONCURRENT_FAILS_KEY));
-        CONSISTENCY = props.getProperty(CONSISTENCY_KEY);
-        if (!Arrays.asList(SUPPORTED_CONSISTENCIES).contains(CONSISTENCY)) {
-            logger.error("Unsupported consistency: " + CONSISTENCY);
-            throw new AssertionError("Unsupported consistency: \" + CONSISTENCY");
-        }
 
         seeds = readSeeds(props.getProperty(INITIAL_MEMBERSHIP_KEY));
         if (seeds.contains(self))
@@ -101,10 +94,11 @@ public class EsolatedPaxosProto extends GenericProtocol {
     public void init(Properties props) throws HandlerRegistrationException, IOException {
 
         Properties peerProps = new Properties();
-        peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(MultithreadedTCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
-        peerProps.put(MultithreadedTCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerChannel = createChannel(MultithreadedTCPChannel.NAME, peerProps);
+        peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
+        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
+        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
+        peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
         registerMessageSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
@@ -127,7 +121,7 @@ public class EsolatedPaxosProto extends GenericProtocol {
 
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
 
-        subscribeNotification(SubmitBatchNotification.NOTIFICATION_ID, this::onSubmitBatch);
+        registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
 
         seeds.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
 
@@ -136,9 +130,11 @@ public class EsolatedPaxosProto extends GenericProtocol {
         triggerMembershipChangeNotification();
 
         logger.info("EsolatedPaxos: " + membership + " mcf " + MAX_CONCURRENT_FAILS);
+        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
+        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
-    public void onSubmitBatch(SubmitBatchNotification not, short from) {
+    public void onSubmitBatch(SubmitBatchRequest not, short from) {
         startNextInstance(new AppOpBatch(not.getBatch()));
     }
 
@@ -321,16 +317,7 @@ public class EsolatedPaxosProto extends GenericProtocol {
     private void triggerMembershipChangeNotification() {
         triggerNotification(new MembershipChange(
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                readsTo(), self.getAddress(), null));
-    }
-
-    private InetAddress readsTo() {
-        if (CONSISTENCY.equals("pcs")) {
-            return self.getAddress();
-        } else {
-            logger.error("Unexpected consistency " + CONSISTENCY);
-            throw new AssertionError("Unexpected consistency " + CONSISTENCY);
-        }
+                null, self.getAddress(), null));
     }
 
 
@@ -349,10 +336,10 @@ public class EsolatedPaxosProto extends GenericProtocol {
                     executed = true;
             }
             if (!executed) {
-                try {
-                    Thread.sleep(1);
-                } catch (InterruptedException ignored) {
-                }
+                //try {
+                //    Thread.sleep(1);
+                //} catch (InterruptedException ignored) {
+                //}
             }
         }
     }

@@ -1,57 +1,40 @@
 package frontend.ops;
 
 import io.netty.buffer.ByteBuf;
+import network.data.Host;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 public class ReadOp {
-    private final long opId;
+    private final int opId;
     private final byte[] opData;
+    private final Host client;
 
-    public ReadOp(long opId, byte[] opData) {
+    public ReadOp(int opId, byte[] opData, Host client) {
         this.opId = opId;
         this.opData = opData;
+        this.client = client;
+    }
+
+    public Host getClient() {
+        return client;
     }
 
     public byte[] getOpData() {
         return opData;
     }
 
-    public long getOpId() {
+    public int getOpId() {
         return opId;
     }
 
     @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        ReadOp readOp = (ReadOp) o;
-        return opId == readOp.opId;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(opId);
-    }
-
-    @Override
     public String toString() {
-        return "AppOp{" +
+        return "ReadOp{" +
                 "opId=" + opId +
+                ", opData=" + Arrays.toString(opData) +
+                ", client=" + client +
                 '}';
-    }
-
-    public void serialize(ByteBuf out) {
-        out.writeLong(opId);
-        out.writeInt(opData.length);
-        out.writeBytes(opData);
-    }
-
-    public static ReadOp deserialize(ByteBuf in) {
-        long opId = in.readLong();
-        int opDataSize = in.readInt();
-        byte[] opData = new byte[opDataSize];
-        in.readBytes(opData);
-        return new ReadOp(opId, opData);
     }
 }

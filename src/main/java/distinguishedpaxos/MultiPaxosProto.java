@@ -5,6 +5,7 @@ import babel.exceptions.HandlerRegistrationException;
 import babel.generic.GenericProtocol;
 import babel.generic.ProtoMessage;
 import channel.tcp.MultithreadedTCPChannel;
+import channel.tcp.TCPChannel;
 import channel.tcp.events.*;
 import common.values.AppOpBatch;
 import common.values.NoOpValue;
@@ -19,7 +20,8 @@ import distinguishedpaxos.utils.Membership;
 import distinguishedpaxos.utils.SeqN;
 import frontend.notifications.ExecuteBatchNotification;
 import frontend.notifications.MembershipChange;
-import frontend.notifications.SubmitBatchNotification;
+import frontend.ipc.SubmitBatchRequest;
+import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
 import org.apache.logging.log4j.LogManager;
@@ -36,9 +38,7 @@ public class MultiPaxosProto extends GenericProtocol {
     private static final Logger logger = LogManager.getLogger(MultiPaxosProto.class);
 
     public final static short PROTOCOL_ID = 400;
-    public final static String PROTOCOL_NAME = "DistPaxos";
-
-    public static final String[] SUPPORTED_CONSISTENCIES = {"pcs"};
+    public final static String PROTOCOL_NAME = "MultiProto";
 
     private static final int INITIAL_MAP_SIZE = 1000;
     private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
@@ -50,14 +50,11 @@ public class MultiPaxosProto extends GenericProtocol {
     public static final String INITIAL_STATE_KEY = "initial_state";
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
-    public static final String CONSISTENCY_KEY = "consistency";
 
     private final int LEADER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
-
-    private final String CONSISTENCY;
 
     enum State {ACTIVE}
 
@@ -103,12 +100,6 @@ public class MultiPaxosProto extends GenericProtocol {
         this.LEADER_TIMEOUT = Integer.parseInt(props.getProperty(LEADER_TIMEOUT_KEY));
         this.NOOP_SEND_INTERVAL = LEADER_TIMEOUT / 3;
 
-        this.CONSISTENCY = props.getProperty(CONSISTENCY_KEY);
-        if (!Arrays.asList(SUPPORTED_CONSISTENCIES).contains(CONSISTENCY)) {
-            logger.error("Unsupported consistency: " + CONSISTENCY);
-            throw new AssertionError("Unsupported consistency: \" + CONSISTENCY");
-        }
-
         this.state = State.valueOf(props.getProperty(INITIAL_STATE_KEY));
         seeds = readSeeds(props.getProperty(INITIAL_MEMBERSHIP_KEY));
     }
@@ -118,9 +109,10 @@ public class MultiPaxosProto extends GenericProtocol {
 
         Properties peerProps = new Properties();
         peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(MultithreadedTCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
-        peerProps.put(MultithreadedTCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerChannel = createChannel(MultithreadedTCPChannel.NAME, peerProps);
+        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
+        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
+        peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
         registerMessageSerializer(AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
@@ -147,7 +139,7 @@ public class MultiPaxosProto extends GenericProtocol {
         registerTimerHandler(NoOpTimer.TIMER_ID, this::onNoOpTimer);
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
 
-        subscribeNotification(SubmitBatchNotification.NOTIFICATION_ID, this::onSubmitBatch);
+        registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
 
         if (state == State.ACTIVE) {
             if (!seeds.contains(self)) {
@@ -165,7 +157,11 @@ public class MultiPaxosProto extends GenericProtocol {
         setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
         lastLeaderOp = System.currentTimeMillis();
 
-        logger.info("DistinguishedPaxos: " + membership + " qs " + QUORUM_SIZE);
+        logger.info("MultiPaxos: " + membership + " qs " + QUORUM_SIZE);
+
+        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
+        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
+
     }
 
     private void onLeaderTimer(LeaderTimer timer, long timerId) {
@@ -343,8 +339,8 @@ public class MultiPaxosProto extends GenericProtocol {
         } else
             nextValue = new NoOpValue();
         AcceptMsg acceptMsg = new AcceptMsg(instance.iN, currentSN.getValue(), nextValue);
-        membership.getMembers().forEach(h -> sendOrEnqueue(acceptMsg, h));
-
+        membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(h -> sendOrEnqueue(acceptMsg, h));
+        uponAcceptMsg(acceptMsg, self, this.getProtoId(), peerChannel);
         lastAcceptSent = instance.iN;
         lastAcceptTime = System.currentTimeMillis();
     }
@@ -374,7 +370,9 @@ public class MultiPaxosProto extends GenericProtocol {
         assert instance.acceptedValue != null;
         assert instance.highestAccept != null;
 
-        membership.getMembers().forEach(m -> sendOrEnqueue(new AcceptedMsg(msg.iN, msg.sN, msg.value), m));
+        AcceptedMsg acceptedMsg = new AcceptedMsg(msg.iN, msg.sN, msg.value);
+        membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(m -> sendOrEnqueue(acceptedMsg, m));
+        uponAcceptedMsg(acceptedMsg, self, this.getProtoId(), peerChannel);
         lastLeaderOp = System.currentTimeMillis();
     }
 
@@ -460,7 +458,7 @@ public class MultiPaxosProto extends GenericProtocol {
         }
     }
 
-    public void onSubmitBatch(SubmitBatchNotification not, short from) {
+    public void onSubmitBatch(SubmitBatchRequest not, short from) {
         if (amQuorumLeader)
             sendNextAccept(new AppOpBatch(not.getBatch()));
         else if (supportedLeader().equals(self))
@@ -509,18 +507,7 @@ public class MultiPaxosProto extends GenericProtocol {
     private void triggerMembershipChangeNotification() {
         triggerNotification(new MembershipChange(
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                readsTo(),
-                supportedLeader().getAddress(),
-                null));
-    }
-
-    private InetAddress readsTo() {
-        if (CONSISTENCY.equals("pcs")) {
-            return self.getAddress();
-        } else {
-            logger.error("Unexpected consistency " + CONSISTENCY);
-            throw new AssertionError("Unexpected consistency " + CONSISTENCY);
-        }
+                null, supportedLeader().getAddress(), null));
     }
 
     private void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {

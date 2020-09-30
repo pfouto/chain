@@ -6,16 +6,18 @@ import babel.generic.BaseProtoMessageSerializer;
 import babel.generic.GenericProtocol;
 import babel.generic.ProtoMessage;
 import channel.tcp.MultithreadedTCPChannel;
+import channel.tcp.TCPChannel;
 import channel.tcp.events.*;
 import common.values.AppOpBatch;
 import common.values.NoOpValue;
 import common.values.PaxosValue;
 import frontend.notifications.ExecuteBatchNotification;
 import frontend.notifications.MembershipChange;
+import frontend.timers.InfoTimer;
 import network.Connection;
 import network.listeners.MessageListener;
 import ringpaxos.timers.*;
-import frontend.notifications.SubmitBatchNotification;
+import frontend.ipc.SubmitBatchRequest;
 import ringpaxos.messages.*;
 import ringpaxos.utils.*;
 import io.netty.channel.EventLoopGroup;
@@ -35,9 +37,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     private static final Logger logger = LogManager.getLogger(RingPaxosProto.class);
 
     public final static short PROTOCOL_ID = 600;
-    public final static String PROTOCOL_NAME = "RingPaxos";
-
-    public static final String[] SUPPORTED_CONSISTENCIES = {"pcs", "serial"};
+    public final static String PROTOCOL_NAME = "RingProto";
 
     private static final int INITIAL_MAP_SIZE = 1000;
     private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
@@ -49,10 +49,9 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     public static final String INITIAL_STATE_KEY = "initial_state";
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
-    public static final String CONSISTENCY_KEY = "consistency";
     public static final String ACCEPT_TIMEOUT_KEY = "accept_timeout";
     public static final String REQ_TIMEOUT_KEY = "req_timeout";
-    public static final String MAX_BATCH_SIZE_KEY = "max_batch_bytes";
+    public static final String MAX_INSTANCES_KEY = "ring_max_instances";
 
     private final int LEADER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
@@ -61,8 +60,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     private final int ACCEPT_TIMEOUT;
     private final int REQ_TIMEOUT;
     private final int MAX_BATCH_SIZE;
-
-    private final String CONSISTENCY;
+    private final int MAX_INSTANCES;
 
     enum State {ACTIVE}
 
@@ -79,6 +77,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     private boolean amQuorumLeader;
     private long lastAcceptTime;
 
+    private Queue<SubmitBatchRequest> pendingOps;
     //Timers
     private long noOpTimer = -1;
     private long lastLeaderOp;
@@ -102,20 +101,11 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
         this.ACCEPT_TIMEOUT = Integer.parseInt(props.getProperty(ACCEPT_TIMEOUT_KEY));
         this.REQ_TIMEOUT = Integer.parseInt(props.getProperty(REQ_TIMEOUT_KEY));
-        this.MAX_BATCH_SIZE = Integer.parseInt(props.getProperty(MAX_BATCH_SIZE_KEY));
-        if (MAX_BATCH_SIZE <= 0 || MAX_BATCH_SIZE > 65000 - 1000) {
-            logger.error("MAX_BATCH_SIZE too high: " + MAX_BATCH_SIZE);
-            throw new AssertionError("MAX_BATCH_SIZE too high: " + MAX_BATCH_SIZE);
-        }
+        this.MAX_INSTANCES = Integer.parseInt(props.getProperty(MAX_INSTANCES_KEY));
+        this.MAX_BATCH_SIZE = 65000 - 1000;
 
         this.LEADER_TIMEOUT = Integer.parseInt(props.getProperty(LEADER_TIMEOUT_KEY));
         this.NOOP_SEND_INTERVAL = LEADER_TIMEOUT / 3;
-
-        this.CONSISTENCY = props.getProperty(CONSISTENCY_KEY);
-        if (!Arrays.asList(SUPPORTED_CONSISTENCIES).contains(CONSISTENCY)) {
-            logger.error("Unsupported consistency: " + CONSISTENCY);
-            throw new AssertionError("Unsupported consistency: \" + CONSISTENCY");
-        }
 
         this.state = State.valueOf(props.getProperty(INITIAL_STATE_KEY));
         seeds = readSeeds(props.getProperty(INITIAL_MEMBERSHIP_KEY));
@@ -126,10 +116,11 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     public void init(Properties props) throws HandlerRegistrationException, IOException {
 
         Properties peerProps = new Properties();
-        peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(MultithreadedTCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
-        peerProps.put(MultithreadedTCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerChannel = createChannel(MultithreadedTCPChannel.NAME, peerProps);
+        peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
+        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
+        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
+        peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
         registerMessageSerializer(AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
@@ -160,7 +151,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         registerTimerHandler(NoOpTimer.TIMER_ID, this::onNoOpTimer);
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
 
-        subscribeNotification(SubmitBatchNotification.NOTIFICATION_ID, this::onSubmitBatch);
+        registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
 
         BaseProtoMessageSerializer serializer = new BaseProtoMessageSerializer(new ConcurrentHashMap<>());
         serializer.registerProtoSerializer(AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
@@ -195,11 +186,14 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         lastLeaderOp = System.currentTimeMillis();
 
         logger.info("RingPaxos: " + membership + " qs " + QUORUM_SIZE);
+
+        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
+        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
     @Override
     public void deliverMessage(ProtoMessage msg, Connection<ProtoMessage> conn) {
-        this.deliverMessageIn(new MessageInEvent(msg,null, peerChannel));
+        this.deliverMessageIn(new MessageInEvent(msg, null, peerChannel));
     }
 
     private void onLeaderTimer(LeaderTimer timer, long timerId) {
@@ -321,9 +315,11 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         noOpTimer = setupPeriodicTimer(NoOpTimer.instance, NOOP_SEND_INTERVAL / 3, NOOP_SEND_INTERVAL / 3);
         logger.info("I am leader now! @ instance " + instanceNumber);
 
+        pendingOps = new LinkedList<>();
+
         //Propagate received accepted ops
         for (int i = instanceNumber; i <= highestAcceptedInstance; i++) {
-            logger.debug("Propagating received operations: " + i);
+            //logger.debug("Propagating received operations: " + i);
             InstanceState aI = instances.get(i);
             assert aI.acceptedValue != null;
             assert aI.highestAccept != null;
@@ -337,7 +333,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     }
 
     private void uponDecidedMsg(DecidedMsg msg, Host from, short sourceProto, int channel) {
-        logger.debug(msg + " from:" + from);
+        //logger.debug(msg + " from:" + from);
 
         InstanceState instance = instances.get(msg.iN);
         if (instance == null || msg.iN <= highestDecidedInstance || currentSN.getValue().greaterThan(msg.sN)) {
@@ -360,6 +356,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     }
 
     private void sendNextAccept(PaxosValue val) {
+        logger.debug("SendNextAccept: " + val);
         //Check if old accepts timed out
         long now = System.currentTimeMillis();
         for (int i = highestDecidedInstance + 1; i <= highestAcceptedInstance; i++) {
@@ -419,15 +416,20 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
 
         //Normal paxos - Accept
         instance.accept(msg.sN, msg.value);
-        highestAcceptedInstance = Math.max(highestAcceptedInstance, instance.iN);
         assert instance.acceptedValue != null;
         assert instance.highestAccept != null;
 
         int indexOfLeader = membership.indexOf(msg.sN.getNode());
         int myIndex = membership.indexOf(self);
         if ((indexOfLeader + QUORUM_SIZE - 1) % membership.size() == myIndex) {
-            sendMessage(new AcceptedMsg(msg.iN, msg.sN), membership.atIndex(myIndex - 1));
+            InstanceState inst;
+            while ((inst = instances.computeIfAbsent(highestAcceptedInstance + 1, InstanceState::new))
+                    .highestAccept != null) {
+                highestAcceptedInstance++;
+                sendMessage(new AcceptedMsg(inst.iN, inst.highestAccept), membership.atIndex(myIndex - 1));
+            }
         }
+
         lastLeaderOp = System.currentTimeMillis();
     }
 
@@ -480,14 +482,18 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         //Missing old decisions
         if (instanceNumber != highestDecidedInstance + 1) {
             long now = System.currentTimeMillis();
-            for (int i = highestDecidedInstance + 1; i < instanceNumber; i++) {
-                InstanceState oldInst = instances.computeIfAbsent(i, InstanceState::new);
-                if (!oldInst.canDecide() && now - oldInst.getDecisionReqTS() > REQ_TIMEOUT) {
-                    sendMessage(new ReqDecisionMsg(i),
-                            membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
-                    oldInst.setDecisionReqTS(now);
-                }
+            //for (int i = highestDecidedInstance + 1; i < instanceNumber; i++) {
+            int toReq = highestDecidedInstance + 1;
+            InstanceState oldInst = instances.computeIfAbsent(toReq, InstanceState::new);
+            if (!oldInst.canDecide() && now - oldInst.getDecisionReqTS() > REQ_TIMEOUT) {
+                sendMessage(new ReqDecisionMsg(toReq),
+                        membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
+                /*logger.warn("Requesting old decision: " + toReq + " to " +
+                        membership.atIndex((membership.indexOf(self) + 1) % membership.size()) + " "
+                        + " decided until " + highestDecidedInstance + " received " + instanceNumber);*/
+                oldInst.setDecisionReqTS(now);
             }
+            //}
         }
 
         InstanceState instance = instances.computeIfAbsent(highestDecidedInstance + 1, InstanceState::new);
@@ -517,18 +523,27 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         assert highestDecidedInstance == instance.iN;
 
         //Actually execute message
-        logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
+        //logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
         if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
             triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
         } else if (instance.acceptedValue.type != PaxosValue.Type.NO_OP) {
             logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
             throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
         }
+
+        if (amQuorumLeader) {
+            while (highestAcceptedInstance - highestDecidedInstance < MAX_INSTANCES && !pendingOps.isEmpty()) {
+                sendNextAccept(new AppOpBatch(pendingOps.remove().getBatch()));
+            }
+        }
     }
 
-    public void onSubmitBatch(SubmitBatchNotification not, short from) {
+    public void onSubmitBatch(SubmitBatchRequest not, short from) {
         if (amQuorumLeader)
-            sendNextAccept(new AppOpBatch(not.getBatch()));
+            if (highestAcceptedInstance - highestDecidedInstance < MAX_INSTANCES && pendingOps.isEmpty())
+                sendNextAccept(new AppOpBatch(not.getBatch()));
+            else
+                pendingOps.add(not);
         else if (supportedLeader().equals(self))
             waitingAppOps.add(new AppOpBatch(not.getBatch()));
         else
@@ -540,7 +555,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     }
 
     void sendOrEnqueue(ProtoMessage msg, Host destination) {
-        logger.debug("Destination: " + destination);
+        //logger.debug("Destination: " + destination);
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
@@ -585,20 +600,9 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
     private void triggerMembershipChangeNotification() {
         triggerNotification(new MembershipChange(
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                readsTo(),
+                null,
                 supportedLeader().getAddress(),
                 null));
-    }
-
-    private InetAddress readsTo() {
-        if (CONSISTENCY.equals("pcs")) {
-            return self.getAddress();
-        } else if (CONSISTENCY.equals("serial")) {
-            return supportedLeader().getAddress();
-        } else {
-            logger.error("Unexpected consistency " + CONSISTENCY);
-            throw new AssertionError("Unexpected consistency " + CONSISTENCY);
-        }
     }
 
     private void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {

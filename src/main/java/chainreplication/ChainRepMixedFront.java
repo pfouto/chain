@@ -1,14 +1,19 @@
-package chainpaxos;
+package chainreplication;
 
 import babel.exceptions.HandlerRegistrationException;
+import chainreplication.notifications.ReplyBatchNotification;
 import channel.tcp.events.OutConnectionDown;
 import channel.tcp.events.OutConnectionFailed;
 import channel.tcp.events.OutConnectionUp;
 import frontend.FrontendProto;
+import frontend.ipc.SubmitBatchRequest;
 import frontend.network.*;
-import frontend.notifications.*;
+import frontend.notifications.ExecuteBatchNotification;
+import frontend.notifications.ExecuteReadReply;
+import frontend.notifications.MembershipChange;
 import frontend.ops.OpBatch;
 import frontend.timers.BatchTimer;
+import frontend.timers.InfoTimer;
 import frontend.utils.OpInfo;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
@@ -16,15 +21,15 @@ import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.*;
+import java.io.IOException;
 import java.util.*;
 
-public class ChainPaxosMixedFrontend extends FrontendProto {
+public class ChainRepMixedFront extends FrontendProto {
 
-    private static final Logger logger = LogManager.getLogger(ChainPaxosMixedFrontend.class);
+    private static final Logger logger = LogManager.getLogger(ChainRepMixedFront.class);
 
-    public final static short PROTOCOL_ID = 100;
-    public final static String PROTOCOL_NAME = "ChainFrontend";
+    public final static short PROTOCOL_ID_BASE = 100;
+    public final static String PROTOCOL_NAME_BASE = "ChainRepMixFront_";
 
     public static final String READ_RESPONSE_BYTES_KEY = "read_response_bytes";
     public static final String BATCH_INTERVAL_KEY = "batch_interval";
@@ -45,8 +50,9 @@ public class ChainPaxosMixedFrontend extends FrontendProto {
 
     private final byte[] response;
 
-    public ChainPaxosMixedFrontend(Properties props, EventLoopGroup workerGroup) throws IOException {
-        super(PROTOCOL_NAME, PROTOCOL_ID, props, workerGroup);
+    public ChainRepMixedFront(Properties props, EventLoopGroup workerGroup, short protoIndex) throws IOException {
+        super(PROTOCOL_NAME_BASE + protoIndex, (short) (PROTOCOL_ID_BASE + protoIndex),
+                props, workerGroup, protoIndex);
 
         this.BATCH_INTERVAL = Integer.parseInt(props.getProperty(BATCH_INTERVAL_KEY));
         this.BATCH_SIZE = Integer.parseInt(props.getProperty(BATCH_SIZE_KEY));
@@ -65,7 +71,11 @@ public class ChainPaxosMixedFrontend extends FrontendProto {
         setupPeriodicTimer(new BatchTimer(), BATCH_INTERVAL, (long) (BATCH_INTERVAL * 0.8));
         registerTimerHandler(BatchTimer.TIMER_ID, this::handleBatchTimer);
 
+        subscribeNotification(ReplyBatchNotification.NOTIFICATION_ID, this::onReplyNotification);
         lastBatchTime = System.currentTimeMillis();
+
+        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
+        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
     /* -------------------- ---------- ----------------------------------------------- */
@@ -105,7 +115,7 @@ public class ChainPaxosMixedFrontend extends FrontendProto {
     }
 
     protected void onPeerWriteMessage(PeerWriteMessage msg, Host from, short sProto, int channel) {
-        triggerNotification(new SubmitBatchNotification(msg.getBatch()));
+        sendRequest(new SubmitBatchRequest(msg.getBatch()), ChainRepMixedProto.PROTOCOL_ID);
     }
 
     /* -------------------- -------- ----------------------------------------------- */
@@ -127,7 +137,7 @@ public class ChainPaxosMixedFrontend extends FrontendProto {
     private void sendNewBatch() {
         long internalId = nextId();
 
-        OpBatch batch = new OpBatch(internalId, self, opDataBuffer);
+        OpBatch batch = new OpBatch(internalId, self, getProtoId(), opDataBuffer);
         pendingBatches.add(Triple.of(internalId, opInfoBuffer, batch));
 
         opInfoBuffer = new ArrayList<>(BATCH_SIZE);
@@ -140,7 +150,7 @@ public class ChainPaxosMixedFrontend extends FrontendProto {
     protected void onOutConnectionUp(OutConnectionUp event, int channel) {
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
-            logger.info("Connected to writesTo " + event);
+            logger.debug("Connected to writesTo " + event);
         } else {
             logger.warn("Unexpected connectionUp, ignoring and closing: " + event);
             closeConnection(peer, peerChannel);
@@ -182,7 +192,11 @@ public class ChainPaxosMixedFrontend extends FrontendProto {
     /* -------------------- CONSENSUS OPS ----------------------------------------------- */
     /* -------------------- ------------- ----------------------------------------------- */
     protected void _onExecuteBatch(ExecuteBatchNotification not, short from) {
-        if (not.getBatch().getIssuer().equals(self)) {
+
+    }
+
+    protected void onReplyNotification(ReplyBatchNotification not, short from) {
+        if ((not.getBatch().getIssuer().equals(self)) && (not.getBatch().getFrontendId() == getProtoId())) {
             Triple<Long, List<OpInfo>, OpBatch> ops = pendingBatches.poll();
             if (ops == null || ops.getLeft() != not.getBatch().getBatchId()) {
                 logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
@@ -194,7 +208,7 @@ public class ChainPaxosMixedFrontend extends FrontendProto {
         }
     }
 
-    protected void _onExecuteRead(ExecuteReadNotification not, short from) {
+    protected void _onExecuteRead(ExecuteReadReply not, short from) {
         throw new IllegalStateException();
     }
 

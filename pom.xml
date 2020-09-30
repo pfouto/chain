@@ -12,12 +12,11 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
-
     <dependencies>
         <dependency>
             <groupId>pt.unl.fct.di.novasys</groupId>
             <artifactId>babel-core</artifactId>
-            <version>0.4.25</version>
+            <version>0.4.26</version>
         </dependency>
         <dependency>
             <groupId>org.apache.zookeeper</groupId>

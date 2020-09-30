@@ -10,13 +10,17 @@ import chainpaxos.utils.AcceptedValue;
 import chainpaxos.utils.InstanceState;
 import chainpaxos.utils.Membership;
 import chainpaxos.utils.SeqN;
+import channel.tcp.TCPChannel;
+import channel.tcp.events.*;
 import common.values.AppOpBatch;
 import common.values.MembershipOp;
 import common.values.NoOpValue;
 import common.values.PaxosValue;
-import channel.tcp.MultithreadedTCPChannel;
-import channel.tcp.events.*;
+import frontend.ipc.DeliverSnapshotReply;
+import frontend.ipc.GetSnapshotRequest;
+import frontend.ipc.SubmitBatchRequest;
 import frontend.notifications.*;
+import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
 import org.apache.commons.lang3.tuple.MutablePair;
@@ -35,7 +39,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
     private static final Logger logger = LogManager.getLogger(ChainPaxosMixedProto.class);
 
     public final static short PROTOCOL_ID = 200;
-    public final static String PROTOCOL_NAME = "ChainPaxos";
+    public final static String PROTOCOL_NAME = "ChainProtoMixed";
 
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
@@ -135,10 +139,11 @@ public class ChainPaxosMixedProto extends GenericProtocol {
     public void init(Properties props) throws HandlerRegistrationException, IOException {
 
         Properties peerProps = new Properties();
-        peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(MultithreadedTCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
-        peerProps.put(MultithreadedTCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerChannel = createChannel(MultithreadedTCPChannel.NAME, peerProps);
+        peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
+        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
+        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
+        peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
         registerMessageSerializer(AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
@@ -180,8 +185,8 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         registerTimerHandler(NoOpTimer.TIMER_ID, this::onNoOpTimer);
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
 
-        subscribeNotification(DeliverSnapshotNotification.NOTIFICATION_ID, this::onDeliverSnapshot);
-        subscribeNotification(SubmitBatchNotification.NOTIFICATION_ID, this::onSubmitBatch);
+        registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
+        registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
 
         if (state == State.ACTIVE) {
             if (!seeds.contains(self)) {
@@ -194,6 +199,9 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         }
 
         logger.info("ChainPaxos: " + membership + " qs " + QUORUM_SIZE);
+
+        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
+        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
     private void setupInitialState(List<Host> members, int instanceNumber) {
@@ -289,7 +297,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         }
     }
 
-    public void onDeliverSnapshot(DeliverSnapshotNotification not, short from) {
+    public void onDeliverSnapshot(DeliverSnapshotReply not, short from) {
         MutablePair<Integer, Boolean> pending = pendingSnapshots.remove(not.getSnapshotTarget());
         assert not.getSnapshotInstance() == pending.getLeft();
         storedSnapshots.put(not.getSnapshotTarget(), Pair.of(not.getSnapshotInstance(), not.getState()));
@@ -542,8 +550,8 @@ public class ChainPaxosMixedProto extends GenericProtocol {
                 if (inst.counter < QUORUM_SIZE) {
                     logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
                             + inst.counter);
-                    throw new AssertionError("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
-                            + inst.counter);
+                    throw new AssertionError("Last living in chain cannot decide. " +
+                            "Are f+1 nodes dead/inRemoval? " + inst.counter);
                 }
                 sendMessage(new AcceptAckMsg(inst.iN), target);
             } else { //not last in chain...
@@ -601,7 +609,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
             logger.warn("Received " + msg + " without being leader, ignoring.");
     }
 
-    public void onSubmitBatch(SubmitBatchNotification not, short from) {
+    public void onSubmitBatch(SubmitBatchRequest not, short from) {
         if (amQuorumLeader)
             sendNextAccept(new AppOpBatch(not.getBatch()));
         else if (supportedLeader().equals(self))
@@ -636,8 +644,8 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         } else
             nextValue = new NoOpValue();
 
-        this.deliverMessageIn(new MessageInEvent(new AcceptMsg(instance.iN, currentSN.getValue(),
-                (short) 0, nextValue, highestAcknowledgedInstance), self, peerChannel));
+        this.uponAcceptMsg(new AcceptMsg(instance.iN, currentSN.getValue(),
+                (short) 0, nextValue, highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
 
         lastAcceptSent = instance.iN;
         lastAcceptTime = System.currentTimeMillis();
@@ -734,7 +742,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
                 assert highestDecidedInstance == instance.iN;
                 //TODO need mechanism for joining node to inform nodes they can forget stored state
                 pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
-                triggerNotification(new GetSnapshotNotification(target, instance.iN));
+                sendRequest(new GetSnapshotRequest(target, instance.iN), ChainPaxosMixedFront.PROTOCOL_ID_BASE);
             }
         }
     }

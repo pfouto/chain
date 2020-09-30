@@ -28,4 +28,13 @@ public class OpInfo {
     public int getOpId() {
         return opId;
     }
+
+    @Override
+    public String toString() {
+        return "OpInfo{" +
+                "client=" + client +
+                ", opId=" + opId +
+                ", opType=" + opType +
+                '}';
+    }
 }

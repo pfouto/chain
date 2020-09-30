@@ -4,7 +4,11 @@ import babel.events.MessageInEvent;
 import babel.exceptions.HandlerRegistrationException;
 import babel.generic.GenericProtocol;
 import babel.generic.ProtoMessage;
-import chainreplication.messages.*;
+import chainreplication.messages.AcceptAckMsg;
+import chainreplication.messages.AcceptMsg;
+import chainreplication.messages.JoinRequestMsg;
+import chainreplication.messages.StateTransferMsg;
+import chainreplication.notifications.ReplyBatchNotification;
 import chainreplication.requests.MembershipChangeEvt;
 import chainreplication.timer.JoinTimer;
 import chainreplication.timer.ReconnectTimer;
@@ -12,9 +16,16 @@ import chainreplication.utils.Membership;
 import chainreplication.zookeeper.IMembershipListener;
 import chainreplication.zookeeper.ProcessNode;
 import channel.tcp.MultithreadedTCPChannel;
+import channel.tcp.TCPChannel;
 import channel.tcp.events.*;
 import common.values.AppOpBatch;
-import frontend.notifications.*;
+import frontend.ipc.DeliverSnapshotReply;
+import frontend.ipc.GetSnapshotRequest;
+import frontend.ipc.SubmitBatchRequest;
+import frontend.notifications.ExecuteBatchNotification;
+import frontend.notifications.InstallSnapshotNotification;
+import frontend.notifications.MembershipChange;
+import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
 import network.data.Host;
 import org.apache.logging.log4j.LogManager;
@@ -30,26 +41,22 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
-public class ChainReplicationProto extends GenericProtocol implements IMembershipListener {
+public class ChainRepMixedBatchProto extends GenericProtocol implements IMembershipListener {
 
-    private static final Logger logger = LogManager.getLogger(ChainReplicationProto.class);
+    private static final Logger logger = LogManager.getLogger(ChainRepMixedBatchProto.class);
 
     public final static short PROTOCOL_ID = 300;
-    public final static String PROTOCOL_NAME = "ChainReplication";
-
-    public static final String[] SUPPORTED_CONSISTENCIES = {"serial"};
+    public final static String PROTOCOL_NAME = "ChainRepMixedBatchProto";
 
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
     public static final String JOIN_TIMEOUT_KEY = "join_timeout";
     public static final String ZOOKEEPER_URL_KEY = "zookeeper_url";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
-    public static final String CONSISTENCY_KEY = "consistency";
 
     private final int JOIN_TIMEOUT;
     private final int RECONNECT_TIME;
     private final String ZOOKEEPER_URL;
-    private final String CONSISTENCY;
 
     enum State {JOINING, REGISTERING, ACTIVE}
 
@@ -64,14 +71,14 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
     private int highestAcceptReceived = -1;
     private int highestAcceptSent = -1;
 
-    private LinkedList<AcceptMsg> sent = new LinkedList<>();
+    private final LinkedList<AcceptMsg> sent = new LinkedList<>();
 
     private Host pendingNewTail = null;
 
     //Timers
     private long joinTimer = -1;
 
-    public ChainReplicationProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
+    public ChainRepMixedBatchProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME, PROTOCOL_ID /*, new BetterEventPriorityQueue()*/);
 
         this.workerGroup = workerGroup;
@@ -81,12 +88,6 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
         this.JOIN_TIMEOUT = Integer.parseInt(props.getProperty(JOIN_TIMEOUT_KEY));
         this.ZOOKEEPER_URL = props.getProperty(ZOOKEEPER_URL_KEY);
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
-        this.CONSISTENCY = props.getProperty(CONSISTENCY_KEY);
-        if(!Arrays.asList(SUPPORTED_CONSISTENCIES).contains(CONSISTENCY)){
-            logger.error("Unsupported consistency: " + CONSISTENCY);
-            throw new AssertionError("Unsupported consistency: \" + CONSISTENCY");
-        }
-
 
         this.membership = new Membership(-1, Collections.emptyList());
         this.state = State.JOINING;
@@ -96,10 +97,11 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
     @Override
     public void init(Properties props) throws HandlerRegistrationException, IOException {
         Properties peerProps = new Properties();
-        peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(MultithreadedTCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
-        peerProps.put(MultithreadedTCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerChannel = createChannel(MultithreadedTCPChannel.NAME, peerProps);
+        peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
+        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
+        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
+        peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
         registerMessageSerializer(AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
@@ -113,17 +115,13 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
         registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::uponOutConnectionUp);
         registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::uponOutConnectionFailed);
 
-        registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg,
-                this::uponMessageFailed);
-        registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg,
-                this::uponMessageFailed);
-        registerMessageHandler(peerChannel, JoinRequestMsg.MSG_CODE, this::uponJoinRequestMsg,
-                this::uponMessageFailed);
-        registerMessageHandler(peerChannel, StateTransferMsg.MSG_CODE, this::uponStateTransferMsg,
-                this::uponMessageFailed);
+        registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, JoinRequestMsg.MSG_CODE, this::uponJoinRequestMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, StateTransferMsg.MSG_CODE, this::uponStateTransferMsg, this::uponMessageFailed);
 
-        subscribeNotification(DeliverSnapshotNotification.NOTIFICATION_ID, this::onDeliverSnapshot);
-        subscribeNotification(SubmitBatchNotification.NOTIFICATION_ID, this::onSubmitBatch);
+        registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
+        registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
 
         registerRequestHandler(MembershipChangeEvt.REQUEST_ID, this::onMembershipChangeEvt);
 
@@ -145,6 +143,9 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
         }
 
         logger.info("Starting ChainReplication");
+
+        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
+        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
     private void onJoinTimer(JoinTimer timer, long timerId) {
@@ -171,11 +172,11 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
         }
         // if(!pending.isEmpty()) throw new AssertionError();
         pendingNewTail = from;
-        triggerNotification(new GetSnapshotNotification(pendingNewTail, highestAcceptReceived));
+        sendRequest(new GetSnapshotRequest(pendingNewTail, highestAcceptReceived), ChainRepMixedFront.PROTOCOL_ID_BASE);
         openConnection(from);
     }
 
-    public void onDeliverSnapshot(DeliverSnapshotNotification not, short from) {
+    public void onDeliverSnapshot(DeliverSnapshotReply not, short from) {
         if (not.getSnapshotTarget().equals(pendingNewTail)) {
             StateTransferMsg sMsg = new StateTransferMsg(not.getSnapshotInstance(), not.getState());
             sendMessage(sMsg, pendingNewTail);
@@ -202,7 +203,7 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
         }
     }
 
-    public void onSubmitBatch(SubmitBatchNotification not, short from) {
+    public void onSubmitBatch(SubmitBatchRequest not, short from) {
         if (state == State.ACTIVE && membership.isHead())
             sendNextAccept(new AppOpBatch(not.getBatch()));
         else
@@ -232,7 +233,7 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
             if (pendingNewTail != null) {
                 sent.add(msg);
             } else {
-                //triggerNotification(new ExecuteBatchNotification(((AppOpBatch) msg.value).getBatch()));
+                triggerNotification(new ReplyBatchNotification(((AppOpBatch) msg.value).getBatch()));
                 sendMessage(new AcceptAckMsg(msg.iN), processNode.getNodeAddress(membership.prevNode()));
             }
         } else {
@@ -244,7 +245,7 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
     private void uponAcceptAckMsg(AcceptAckMsg msg, Host from, short sourceProto, int channel) {
         while (!sent.isEmpty() && sent.getFirst().iN <= msg.instanceNumber) {
             AcceptMsg toExec = sent.removeFirst();
-            //triggerNotification(new ExecuteBatchNotification(((AppOpBatch) toExec.value).getBatch()));
+            triggerNotification(new ReplyBatchNotification(((AppOpBatch) toExec.value).getBatch()));
         }
 
         if (!membership.isHead())
@@ -347,7 +348,7 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(id -> processNode.getNodeAddress(id).getAddress())
                             .collect(Collectors.toList()),
-                    readsTo(),
+                    null,
                     processNode.getNodeAddress(membership.headId()).getAddress(),
                     processNode.getNodeAddress(membership.tailId()).getAddress()));
         }
@@ -400,14 +401,5 @@ public class ChainReplicationProto extends GenericProtocol implements IMembershi
 
     private void uponInConnectionDown(InConnectionDown event, int channel) {
         logger.info(event);
-    }
-
-    private InetAddress readsTo(){
-        if (CONSISTENCY.equals("serial")){
-            return processNode.getNodeAddress(membership.tailId()).getAddress();
-        } else {
-            logger.error("Unexpected consistency " + CONSISTENCY);
-            throw new AssertionError("Unexpected consistency " + CONSISTENCY);
-        }
     }
 }
