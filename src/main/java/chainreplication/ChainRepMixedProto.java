@@ -206,7 +206,7 @@ public class ChainRepMixedProto extends GenericProtocol implements IMembershipLi
     }
 
     private void sendNextAccept(AppOpBatch val) {
-        sendMessage(new AcceptMsg(++highestAcceptSent, val), self);
+        this.uponAcceptMsg(new AcceptMsg(++highestAcceptSent, val), self, this.getProtoId(), peerChannel);
     }
 
     private void uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel) {

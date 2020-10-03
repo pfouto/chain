@@ -5,13 +5,11 @@ import babel.exceptions.HandlerRegistrationException;
 import babel.exceptions.InvalidParameterException;
 import babel.exceptions.ProtocolAlreadyExistsException;
 import babel.generic.GenericProtocol;
-import chainpaxos.ChainPaxosDelayedFront;
-import chainpaxos.ChainPaxosDelayedProto;
-import chainpaxos.ChainPaxosMixedFront;
-import chainpaxos.ChainPaxosMixedProto;
+import chainpaxos.*;
 import chainreplication.ChainRepMixedFront;
 import chainreplication.ChainRepMixedProto;
 import distinguishedpaxos.DistPaxosFront;
+import distinguishedpaxos.DistPaxosPiggyProto;
 import distinguishedpaxos.DistPaxosProto;
 import distinguishedpaxos.MultiPaxosProto;
 import epaxos.EPaxosFront;
@@ -23,6 +21,7 @@ import network.NetworkManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import ringpaxos.RingPaxosFront;
+import ringpaxos.RingPaxosPiggyProto;
 import ringpaxos.RingPaxosProto;
 
 import java.io.IOException;
@@ -58,38 +57,46 @@ public class Main {
 
         List<FrontendProto> frontendProtos = new LinkedList<>();
         GenericProtocol consensusProto;
-        if (alg.startsWith("chain_mixed")) {
+        if (alg.equals("chain_mixed")) {
             for (short i = 0; i < nFrontends; i++)
                 frontendProtos.add(new ChainPaxosMixedFront(configProps, NetworkManager.createNewWorkerGroup(), i));
             consensusProto = new ChainPaxosMixedProto(configProps, workerGroup);
-        } else if (alg.startsWith("chain_delayed")) {
+        } else if (alg.equals("chain_delayed")) {
             for (short i = 0; i < nFrontends; i++)
                 frontendProtos.add(new ChainPaxosDelayedFront(configProps, NetworkManager.createNewWorkerGroup(), i));
             consensusProto = new ChainPaxosDelayedProto(configProps, workerGroup);
-        } else if (alg.startsWith("chainrep")) {
+        } else if (alg.equals("chainrep")) {
             for (short i = 0; i < nFrontends; i++)
                 frontendProtos.add(new ChainRepMixedFront(configProps, NetworkManager.createNewWorkerGroup(), i));
             consensusProto = new ChainRepMixedProto(configProps, workerGroup);
-        } else if (alg.startsWith("distinguished")) {
+        } else if (alg.equals("distinguished")) {
             for (short i = 0; i < nFrontends; i++)
                 frontendProtos.add(new DistPaxosFront(configProps, NetworkManager.createNewWorkerGroup(), i));
             consensusProto = new DistPaxosProto(configProps, workerGroup);
-        } else if (alg.startsWith("multi")) {
+        } else if (alg.equals("distinguished_piggy")) {
+            for (short i = 0; i < nFrontends; i++)
+                frontendProtos.add(new DistPaxosFront(configProps, NetworkManager.createNewWorkerGroup(), i));
+            consensusProto = new DistPaxosPiggyProto(configProps, workerGroup);
+        } else if (alg.equals("multi")) {
             for (short i = 0; i < nFrontends; i++)
                 frontendProtos.add(new DistPaxosFront(configProps, NetworkManager.createNewWorkerGroup(), i));
             consensusProto = new MultiPaxosProto(configProps, workerGroup);
-        } else if (alg.startsWith("epaxos")) {
+        } else if (alg.equals("epaxos")) {
             for (short i = 0; i < nFrontends; i++)
                 frontendProtos.add(new EPaxosFront(configProps, NetworkManager.createNewWorkerGroup(), i));
             consensusProto = new EPaxosProto(configProps, workerGroup);
-        } else if (alg.startsWith("esolatedpaxos")) {
+        } else if (alg.equals("esolatedpaxos")) {
             for (short i = 0; i < nFrontends; i++)
                 frontendProtos.add(new EPaxosFront(configProps, NetworkManager.createNewWorkerGroup(), i));
             consensusProto = new EsolatedPaxosProto(configProps, workerGroup);
-        } else if (alg.startsWith("ring")) {
+        } else if (alg.equals("ring")) {
             for (short i = 0; i < nFrontends; i++)
                 frontendProtos.add(new RingPaxosFront(configProps, NetworkManager.createNewWorkerGroup(), i));
             consensusProto = new RingPaxosProto(configProps, workerGroup);
+        } else if (alg.equals("ringpiggy")) {
+            for (short i = 0; i < nFrontends; i++)
+                frontendProtos.add(new RingPaxosFront(configProps, NetworkManager.createNewWorkerGroup(), i));
+            consensusProto = new RingPaxosPiggyProto(configProps, workerGroup);
         } else {
             logger.error("Unknown algorithm: " + alg);
             return;

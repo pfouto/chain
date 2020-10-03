@@ -806,6 +806,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
     private void triggerMembershipChangeNotification(){
         triggerNotification(new MembershipChange(
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                null, supportedLeader().getAddress(), null));
+                null, supportedLeader().getAddress(),
+                membership.nodeAt(membership.size()/2).getAddress()));
     }
 }

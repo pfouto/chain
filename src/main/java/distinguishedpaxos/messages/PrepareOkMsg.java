@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class PrepareOkMsg extends ProtoMessage {
-    public static final short MSG_CODE = 208;
+    public static final short MSG_CODE = 408;
     public final int iN;
     public final SeqN sN;
     public final List<AcceptedValue> acceptedValues;

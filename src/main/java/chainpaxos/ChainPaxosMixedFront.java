@@ -26,7 +26,7 @@ public class ChainPaxosMixedFront extends FrontendProto {
     private static final Logger logger = LogManager.getLogger(ChainPaxosMixedFront.class);
 
     public final static short PROTOCOL_ID_BASE = 100;
-    public final static String PROTOCOL_NAME_BASE = "ChainFrontMixed_";
+    public final static String PROTOCOL_NAME_BASE = "ChainFrontMixed";
 
     public static final String READ_RESPONSE_BYTES_KEY = "read_response_bytes";
     public static final String BATCH_INTERVAL_KEY = "batch_interval";

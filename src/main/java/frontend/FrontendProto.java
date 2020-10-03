@@ -80,6 +80,7 @@ public abstract class FrontendProto extends GenericProtocol {
         serverProps.put(SimpleServerChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
         serverProps.put(SimpleServerChannel.PORT_KEY, SERVER_PORT);
         serverProps.put(SimpleServerChannel.WORKER_GROUP_KEY, workerGroup);
+        //serverProps.put(SimpleServerChannel.DEBUG_INTERVAL_KEY, 10000);
         serverChannel = createChannel(SimpleServerChannel.NAME, serverProps);
         if (protoIndex == 0) {
             registerMessageSerializer(RequestMessage.MSG_CODE, RequestMessage.serializer);
@@ -94,8 +95,8 @@ public abstract class FrontendProto extends GenericProtocol {
         Properties peerProps = new Properties();
         peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
         peerProps.put(TCPChannel.PORT_KEY, PEER_PORT);
-
         peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
+        //peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         if (protoIndex == 0) {
             registerMessageSerializer(PeerReadMessage.MSG_CODE, PeerReadMessage.serializer);
