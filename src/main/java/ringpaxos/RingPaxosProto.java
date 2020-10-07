@@ -453,6 +453,8 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
 
         if (instance.highestAccept.equals(msg.sN)) {
             if (msg.sN.getNode().equals(self)) {
+                DecisionMsg decisionMsg = new DecisionMsg(instance.iN, instance.highestAccept);
+                uponDecisionMsg(decisionMsg, self, getProtoId(), -1);
                 multicastNetwork.sendMulticast(new DecisionMsg(instance.iN, instance.highestAccept));
             } else {
                 sendMessage(new AcceptedMsg(msg.iN, msg.sN), membership.atIndex(membership.indexOf(self) - 1));
