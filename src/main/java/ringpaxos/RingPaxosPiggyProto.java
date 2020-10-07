@@ -417,6 +417,10 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
 
         InstanceState instance = instances.computeIfAbsent(msg.iN, InstanceState::new);
 
+        //if(msg.iN > highestAcceptedInstance+1){
+        //    logger.warn("Lost an accept");
+        //}
+
         if (instance.isDecided() && msg.sN.equals(instance.highestAccept)) {
             logger.debug("Discarding decided msg");
             return;
@@ -439,12 +443,25 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
         int indexOfLeader = membership.indexOf(msg.sN.getNode());
         int myIndex = membership.indexOf(self);
         if ((indexOfLeader + QUORUM_SIZE - 1) % membership.size() == myIndex) {
-            InstanceState inst;
-            while ((inst = instances.computeIfAbsent(highestAcceptedInstance + 1, InstanceState::new))
-                    .highestAccept != null) {
-                highestAcceptedInstance++;
-                sendMessage(new AcceptedMsg(inst.iN, inst.highestAccept), membership.atIndex(myIndex - 1));
+            if (msg.iN == highestAcceptedInstance + 1) {
+
+                InstanceState inst;
+                while ((inst = instances.computeIfAbsent(highestAcceptedInstance + 1, InstanceState::new))
+                        .highestAccept != null) {
+                    highestAcceptedInstance++;
+                    sendMessage(new AcceptedMsg(inst.iN, inst.highestAccept), membership.atIndex(myIndex - 1));
+                }
+            } else {
+                InstanceState inst = instances.computeIfAbsent(highestAcceptedInstance + 1, InstanceState::new);
+                long now = System.currentTimeMillis();
+                if (now - inst.getAcceptReqTS() > REQ_TIMEOUT) {
+                    //logger.warn("Asking for accept skipped: " + instance.iN);
+                    sendMessage(new ReqAcceptMsg(inst.iN),
+                            membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
+                    inst.setAcceptReqTS(now);
+                }
             }
+
         }
 
         lastLeaderOp = System.currentTimeMillis();
@@ -534,7 +551,7 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
             }
             instance = instances.computeIfAbsent(highestDecidedInstance + 1, InstanceState::new);
         }
-        if(amQuorumLeader && highestAcceptedInstance == highestDecidedInstance && !pendingDecs.isEmpty()){
+        if (amQuorumLeader && highestAcceptedInstance == highestDecidedInstance && !pendingDecs.isEmpty()) {
             sendNextAccept(new NoOpValue());
         }
     }

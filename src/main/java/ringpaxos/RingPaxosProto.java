@@ -422,11 +422,17 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         int indexOfLeader = membership.indexOf(msg.sN.getNode());
         int myIndex = membership.indexOf(self);
         if ((indexOfLeader + QUORUM_SIZE - 1) % membership.size() == myIndex) {
-            InstanceState inst;
-            while ((inst = instances.computeIfAbsent(highestAcceptedInstance + 1, InstanceState::new))
-                    .highestAccept != null) {
-                highestAcceptedInstance++;
-                sendMessage(new AcceptedMsg(inst.iN, inst.highestAccept), membership.atIndex(myIndex - 1));
+            if(msg.iN == highestAcceptedInstance+1) {
+                InstanceState inst;
+                while ((inst = instances.computeIfAbsent(highestAcceptedInstance + 1, InstanceState::new))
+                        .highestAccept != null) {
+                    highestAcceptedInstance++;
+                    sendMessage(new AcceptedMsg(inst.iN, inst.highestAccept), membership.atIndex(myIndex - 1));
+                }
+            } else {
+                logger.warn("Asking for accept: " + highestAcceptedInstance+1);
+                sendMessage(new ReqAcceptMsg(highestAcceptedInstance+1),
+                        membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
             }
         }
 
@@ -488,9 +494,9 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
             if (!oldInst.canDecide() && now - oldInst.getDecisionReqTS() > REQ_TIMEOUT) {
                 sendMessage(new ReqDecisionMsg(toReq),
                         membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
-                /*logger.warn("Requesting old decision: " + toReq + " to " +
+                logger.warn("Requesting old decision: " + toReq + " to " +
                         membership.atIndex((membership.indexOf(self) + 1) % membership.size()) + " "
-                        + " decided until " + highestDecidedInstance + " received " + instanceNumber);*/
+                        + " decided until " + highestDecidedInstance + " received " + instanceNumber);
                 oldInst.setDecisionReqTS(now);
             }
             //}
@@ -504,7 +510,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
             } else {
                 long now = System.currentTimeMillis();
                 if (now - instance.getAcceptReqTS() > REQ_TIMEOUT) {
-                    //logger.warn("Asking for accept: " + instance.iN);
+                    logger.warn("Asking for accept: " + instance.iN);
                     sendMessage(new ReqAcceptMsg(instance.iN),
                             membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
                     instance.setAcceptReqTS(now);
