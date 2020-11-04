@@ -4,6 +4,7 @@ import babel.events.MessageInEvent;
 import babel.exceptions.HandlerRegistrationException;
 import babel.generic.GenericProtocol;
 import babel.generic.ProtoMessage;
+import chainpaxos.ipc.ReplyReadReply;
 import chainpaxos.messages.*;
 import chainpaxos.timers.*;
 import chainpaxos.utils.AcceptedValue;
@@ -51,6 +52,7 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
     public static final String INITIAL_STATE_KEY = "initial_state";
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
+    public static final String NOOP_INTERVAL_KEY = "noop_interval";
 
     private final int LEADER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
@@ -126,7 +128,10 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
 
         this.LEADER_TIMEOUT = Integer.parseInt(props.getProperty(LEADER_TIMEOUT_KEY));
-        this.NOOP_SEND_INTERVAL = LEADER_TIMEOUT / 3;
+        if (props.containsKey(NOOP_INTERVAL_KEY))
+            this.NOOP_SEND_INTERVAL = Integer.parseInt(props.getProperty(NOOP_INTERVAL_KEY));
+        else
+            this.NOOP_SEND_INTERVAL = LEADER_TIMEOUT / 3;
 
         this.JOIN_TIMEOUT = Integer.parseInt(props.getProperty(JOIN_TIMEOUT_KEY));
         this.STATE_TRANSFER_TIMEOUT = Integer.parseInt(props.getProperty(STATE_TRANSFER_TIMEOUT_KEY));
@@ -414,7 +419,7 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
 
     private void becomeLeader(int instanceNumber) {
         amQuorumLeader = true;
-        noOpTimer = setupPeriodicTimer(NoOpTimer.instance, NOOP_SEND_INTERVAL / 3, NOOP_SEND_INTERVAL / 3);
+        noOpTimer = setupPeriodicTimer(NoOpTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
         logger.info("I am leader now! @ instance " + instanceNumber);
 
         //Propagate received accepted ops
@@ -595,6 +600,9 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
         //For everyone
         for (int i = highestAcknowledgedInstance + 1; i <= instanceN; i++) {
             InstanceState ins = instances.remove(i);
+            ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v), k));
+            //ins.getAttachedReads().forEach((k, v) -> sendReply(new ReplyReadReply(v), k));
+
             assert ins.isDecided();
             highestAcknowledgedInstance++;
             assert highestAcknowledgedInstance == i;
@@ -727,7 +735,6 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
             throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
         }
 
-        instance.getAttachedReads().forEach((k,v) -> sendReply(new ExecuteReadReply(v), k));
     }
 
     private void executeMembershipOp(InstanceState instance) {

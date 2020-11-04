@@ -1,6 +1,7 @@
 package chainpaxos;
 
 import babel.exceptions.HandlerRegistrationException;
+import chainpaxos.ipc.ReplyReadReply;
 import channel.tcp.events.OutConnectionDown;
 import channel.tcp.events.OutConnectionFailed;
 import channel.tcp.events.OutConnectionUp;
@@ -49,7 +50,6 @@ public class ChainPaxosDelayedFront extends FrontendProto {
     private long lastWriteBatchTime;
     private long lastReadBatchTime;
 
-
     //ToForward writes
     private List<OpInfo> writeInfoBuffer;
     private List<byte[]> writeDataBuffer;
@@ -90,6 +90,8 @@ public class ChainPaxosDelayedFront extends FrontendProto {
 
         setupPeriodicTimer(new InfoTimer(), 10000, 10000);
         registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
+
+        registerReplyHandler(ReplyReadReply.REPLY_ID, this::onReplyRead);
 
         lastWriteBatchTime = System.currentTimeMillis();
         lastReadBatchTime = System.currentTimeMillis();
@@ -244,7 +246,6 @@ public class ChainPaxosDelayedFront extends FrontendProto {
     }
 
     protected void _onExecuteRead(ExecuteReadReply not, short from) {
-
         not.getBatchIds().forEach(bId -> {
             Pair<Long, List<ReadOp>> ops = pendingReads.poll();
             if (ops == null || !ops.getKey().equals(bId)) {
@@ -255,6 +256,9 @@ public class ChainPaxosDelayedFront extends FrontendProto {
             ops.getRight().forEach(op -> sendMessage(serverChannel,
                     new ResponseMessage(op.getOpId(), READ_STRONG, response), op.getClient()));
         });
+    }
+
+    protected void onReplyRead(ReplyReadReply not, short from) {
     }
 
     protected void onMembershipChange(MembershipChange notification, short emitterId) {

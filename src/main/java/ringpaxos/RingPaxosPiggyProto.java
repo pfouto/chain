@@ -215,7 +215,7 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
     private void onNoOpTimer(NoOpTimer timer, long timerId) {
         if (amQuorumLeader) {
             assert waitingAppOps.isEmpty();
-            if (System.currentTimeMillis() - lastAcceptTime > NOOP_SEND_INTERVAL)
+            if (!pendingDecs.isEmpty() || System.currentTimeMillis() - lastAcceptTime > NOOP_SEND_INTERVAL)
                 sendNextAccept(new NoOpValue());
         } else {
             logger.warn(timer + " while not quorumLeader");
@@ -323,7 +323,7 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
     private void becomeLeader(int instanceNumber) {
         pendingDecs = new LinkedList<>();
         amQuorumLeader = true;
-        noOpTimer = setupPeriodicTimer(NoOpTimer.instance, NOOP_SEND_INTERVAL / 3, NOOP_SEND_INTERVAL / 3);
+        noOpTimer = setupPeriodicTimer(NoOpTimer.instance, 3, 3);
         logger.info("I am leader now! @ instance " + instanceNumber);
 
         pendingOps = new LinkedList<>();
