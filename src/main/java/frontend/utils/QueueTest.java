@@ -1,6 +1,7 @@
 package frontend.utils;
 
-import babel.events.*;
+
+import pt.unl.fct.di.novasys.babel.internal.*;
 
 import java.util.LinkedList;
 import java.util.List;

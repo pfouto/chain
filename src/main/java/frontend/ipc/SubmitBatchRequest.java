@@ -1,6 +1,6 @@
 package frontend.ipc;
 
-import babel.generic.ProtoRequest;
+import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
 import frontend.ops.OpBatch;
 
 public class SubmitBatchRequest extends ProtoRequest {

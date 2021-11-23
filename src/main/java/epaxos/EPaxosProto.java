@@ -1,11 +1,5 @@
 package epaxos;
 
-import babel.exceptions.HandlerRegistrationException;
-import babel.generic.GenericProtocol;
-import babel.generic.ProtoMessage;
-import channel.tcp.MultithreadedTCPChannel;
-import channel.tcp.TCPChannel;
-import channel.tcp.events.*;
 import common.values.AppOpBatch;
 import common.values.PaxosValue;
 import epaxos.messages.*;
@@ -13,14 +7,18 @@ import epaxos.timers.ReconnectTimer;
 import epaxos.utils.GraphNode;
 import epaxos.utils.Instance;
 import epaxos.utils.Membership;
+import frontend.ipc.SubmitBatchRequest;
 import frontend.notifications.ExecuteBatchNotification;
 import frontend.notifications.MembershipChange;
-import frontend.ipc.SubmitBatchRequest;
-import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
-import network.data.Host;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.events.*;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -95,17 +93,16 @@ public class EPaxosProto extends GenericProtocol {
 
         Properties peerProps = new Properties();
         peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
         peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
-        registerMessageSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
-        registerMessageSerializer(AcceptOkMsg.MSG_CODE, AcceptOkMsg.serializer);
-        registerMessageSerializer(CommitMsg.MSG_CODE, CommitMsg.serializer);
-        registerMessageSerializer(PreAcceptMsg.MSG_CODE, PreAcceptMsg.serializer);
-        registerMessageSerializer(PreAcceptOkMsg.MSG_CODE, PreAcceptOkMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptOkMsg.MSG_CODE, AcceptOkMsg.serializer);
+        registerMessageSerializer(peerChannel, CommitMsg.MSG_CODE, CommitMsg.serializer);
+        registerMessageSerializer(peerChannel, PreAcceptMsg.MSG_CODE, PreAcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, PreAcceptOkMsg.MSG_CODE, PreAcceptOkMsg.serializer);
 
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptOkMsg.MSG_CODE, this::uponAcceptOkMsg, this::uponMessageFailed);
@@ -130,8 +127,6 @@ public class EPaxosProto extends GenericProtocol {
         triggerMembershipChangeNotification();
 
         logger.info("EPaxos: " + membership + " mcf " + MAX_CONCURRENT_FAILS);
-        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
-        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
     public void onSubmitBatch(SubmitBatchRequest not, short from) {

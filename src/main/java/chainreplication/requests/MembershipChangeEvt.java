@@ -1,6 +1,6 @@
 package chainreplication.requests;
 
-import babel.generic.ProtoRequest;
+import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
 
 import java.util.List;
 

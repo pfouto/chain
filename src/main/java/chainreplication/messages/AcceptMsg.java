@@ -1,9 +1,9 @@
 package chainreplication.messages;
 
-import babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import common.values.PaxosValue;
 import io.netty.buffer.ByteBuf;
-import network.ISerializer;
+import pt.unl.fct.di.novasys.network.ISerializer;
 
 import java.io.IOException;
 import java.net.UnknownHostException;

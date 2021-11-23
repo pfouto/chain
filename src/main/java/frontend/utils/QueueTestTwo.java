@@ -1,6 +1,6 @@
 package frontend.utils;
 
-import babel.events.*;
+import pt.unl.fct.di.novasys.babel.internal.*;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadInfo;

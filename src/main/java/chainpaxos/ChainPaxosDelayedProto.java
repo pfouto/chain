@@ -1,18 +1,18 @@
 package chainpaxos;
 
-import babel.events.MessageInEvent;
-import babel.exceptions.HandlerRegistrationException;
-import babel.generic.GenericProtocol;
-import babel.generic.ProtoMessage;
-import chainpaxos.ipc.ReplyReadReply;
+import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import chainpaxos.messages.*;
 import chainpaxos.timers.*;
 import chainpaxos.utils.AcceptedValue;
 import chainpaxos.utils.InstanceState;
 import chainpaxos.utils.Membership;
 import chainpaxos.utils.SeqN;
-import channel.tcp.TCPChannel;
-import channel.tcp.events.*;
+import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
+import pt.unl.fct.di.novasys.babel.internal.MessageInEvent;
+import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import common.values.AppOpBatch;
 import common.values.MembershipOp;
 import common.values.NoOpValue;
@@ -24,7 +24,7 @@ import frontend.ipc.SubmitReadRequest;
 import frontend.notifications.*;
 import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
@@ -146,22 +146,22 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
 
         Properties peerProps = new Properties();
         peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
         peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
-        registerMessageSerializer(AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
-        registerMessageSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
-        registerMessageSerializer(DecidedMsg.MSG_CODE, DecidedMsg.serializer);
-        registerMessageSerializer(JoinRequestMsg.MSG_CODE, JoinRequestMsg.serializer);
-        registerMessageSerializer(JoinSuccessMsg.MSG_CODE, JoinSuccessMsg.serializer);
-        registerMessageSerializer(MembershipOpRequestMsg.MSG_CODE, MembershipOpRequestMsg.serializer);
-        registerMessageSerializer(PrepareMsg.MSG_CODE, PrepareMsg.serializer);
-        registerMessageSerializer(PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
-        registerMessageSerializer(StateRequestMsg.MSG_CODE, StateRequestMsg.serializer);
-        registerMessageSerializer(StateTransferMsg.MSG_CODE, StateTransferMsg.serializer);
-        registerMessageSerializer(UnaffiliatedMsg.MSG_CODE, UnaffiliatedMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, DecidedMsg.MSG_CODE, DecidedMsg.serializer);
+        registerMessageSerializer(peerChannel, JoinRequestMsg.MSG_CODE, JoinRequestMsg.serializer);
+        registerMessageSerializer(peerChannel, JoinSuccessMsg.MSG_CODE, JoinSuccessMsg.serializer);
+        registerMessageSerializer(peerChannel, MembershipOpRequestMsg.MSG_CODE, MembershipOpRequestMsg.serializer);
+        registerMessageSerializer(peerChannel, PrepareMsg.MSG_CODE, PrepareMsg.serializer);
+        registerMessageSerializer(peerChannel, PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
+        registerMessageSerializer(peerChannel, StateRequestMsg.MSG_CODE, StateRequestMsg.serializer);
+        registerMessageSerializer(peerChannel, StateTransferMsg.MSG_CODE, StateTransferMsg.serializer);
+        registerMessageSerializer(peerChannel, UnaffiliatedMsg.MSG_CODE, UnaffiliatedMsg.serializer);
 
         registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
@@ -193,9 +193,6 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
         registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
         registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
         registerRequestHandler(SubmitReadRequest.REQUEST_ID, this::onSubmitRead);
-
-        setupPeriodicTimer(new InfoTimer(), 10050, 10000);
-        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
 
         if (state == State.ACTIVE) {
             if (!seeds.contains(self)) {
@@ -429,8 +426,8 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
             assert aI.acceptedValue != null;
             assert aI.highestAccept != null;
             //goes to the end of the queue
-            this.deliverMessageIn(new MessageInEvent(new AcceptMsg(i, currentSN.getValue(), (short) 0,
-                    aI.acceptedValue, highestAcknowledgedInstance), self, peerChannel));
+            this.deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptMsg(i, currentSN.getValue(), (short) 0,
+                    aI.acceptedValue, highestAcknowledgedInstance), (short)-1, (short)-1), self, peerChannel));
         }
         lastAcceptSent = highestAcceptedInstance;
 
@@ -813,7 +810,7 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
+            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short)-1, (short)-1), self, peerChannel));
             else sendMessage(msg, destination);
         }
     }

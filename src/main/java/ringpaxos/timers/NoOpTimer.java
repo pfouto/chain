@@ -1,6 +1,6 @@
 package ringpaxos.timers;
 
-import babel.generic.ProtoTimer;
+import pt.unl.fct.di.novasys.babel.generic.ProtoTimer;
 
 public class NoOpTimer extends ProtoTimer {
 

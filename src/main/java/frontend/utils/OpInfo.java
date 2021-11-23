@@ -1,6 +1,6 @@
 package frontend.utils;
 
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 public class OpInfo {
     private final Host client;

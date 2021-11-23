@@ -1,6 +1,6 @@
 package chainreplication.notifications;
 
-import babel.generic.ProtoNotification;
+import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
 import frontend.ops.OpBatch;
 
 public class ReplyBatchNotification extends ProtoNotification {

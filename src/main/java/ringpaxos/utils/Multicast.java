@@ -1,14 +1,14 @@
 package ringpaxos.utils;
 
-import babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.InternetProtocolFamily;
 import io.netty.channel.socket.nio.NioDatagramChannel;
-import network.listeners.MessageListener;
-import network.ISerializer;
-import network.messaging.NetworkMessage;
+import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
+import pt.unl.fct.di.novasys.network.listeners.MessageListener;
+import pt.unl.fct.di.novasys.network.ISerializer;
 import ringpaxos.udppipeline.MessageDecoder;
 import ringpaxos.udppipeline.MessageEncoder;
 import ringpaxos.udppipeline.MulticastConnectionHandler;
@@ -18,8 +18,6 @@ import java.net.*;
 import java.util.Map;
 
 public class Multicast {
-
-    NioDatagramChannel ch;
 
     public static InetSocketAddress ADDR;
 
@@ -31,7 +29,9 @@ public class Multicast {
         }
     }
 
-    public Multicast(ISerializer<ProtoMessage> serializer, MessageListener<ProtoMessage> listener, int MAX_PACKET_SIZE)
+    NioDatagramChannel ch;
+
+    public Multicast(ISerializer<BabelMessage> serializer, MessageListener<BabelMessage> listener, int MAX_PACKET_SIZE)
             throws InterruptedException, SocketException {
 
         EventLoopGroup bossGroup = new NioEventLoopGroup();
@@ -58,6 +58,6 @@ public class Multicast {
     }
 
     public void sendMulticast(ProtoMessage msg) {
-        ch.writeAndFlush(msg);
+        ch.writeAndFlush(new BabelMessage(msg, (short)-1, (short)-1));
     }
 }

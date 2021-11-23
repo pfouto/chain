@@ -1,7 +1,7 @@
 package frontend.ipc;
 
-import babel.generic.ProtoNotification;
-import babel.generic.ProtoRequest;
+import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
+import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
 import frontend.ops.OpBatch;
 import frontend.ops.ReadOp;
 

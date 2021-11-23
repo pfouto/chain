@@ -2,7 +2,7 @@ package chainreplication.zookeeper;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 

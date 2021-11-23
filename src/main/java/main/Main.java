@@ -1,10 +1,10 @@
 package main;
 
-import babel.Babel;
-import babel.exceptions.HandlerRegistrationException;
-import babel.exceptions.InvalidParameterException;
-import babel.exceptions.ProtocolAlreadyExistsException;
-import babel.generic.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.core.Babel;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.exceptions.InvalidParameterException;
+import pt.unl.fct.di.novasys.babel.exceptions.ProtocolAlreadyExistsException;
+import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import chainpaxos.*;
 import chainreplication.ChainRepMixedFront;
 import chainreplication.ChainRepMixedProto;
@@ -17,7 +17,7 @@ import epaxos.EPaxosProto;
 import epaxos.EsolatedPaxosProto;
 import frontend.FrontendProto;
 import io.netty.channel.EventLoopGroup;
-import network.NetworkManager;
+import pt.unl.fct.di.novasys.network.NetworkManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import ringpaxos.RingPaxosFront;
@@ -39,7 +39,7 @@ public class Main {
             HandlerRegistrationException, ProtocolAlreadyExistsException {
 
         Babel babel = Babel.getInstance();
-        Properties configProps = babel.loadConfig(args[0], Arrays.copyOfRange(args, 2, args.length));
+        Properties configProps = Babel.loadConfig(Arrays.copyOfRange(args, 1, args.length), "config.properties");
 
         logger.debug(configProps);
         if (configProps.containsKey("interface")) {
@@ -52,7 +52,7 @@ public class Main {
 
         EventLoopGroup workerGroup = NetworkManager.createNewWorkerGroup();
 
-        String alg = args[1];
+        String alg = args[0];
         int nFrontends = Short.parseShort(configProps.getProperty("n_frontends"));
 
         List<FrontendProto> frontendProtos = new LinkedList<>();

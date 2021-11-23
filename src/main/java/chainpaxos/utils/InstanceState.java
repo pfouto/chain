@@ -3,7 +3,7 @@ package chainpaxos.utils;
 
 import common.values.PaxosValue;
 import frontend.ipc.SubmitReadRequest;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.*;
 

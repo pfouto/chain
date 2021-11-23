@@ -1,27 +1,27 @@
 package ringpaxos;
 
-import babel.events.MessageInEvent;
-import babel.exceptions.HandlerRegistrationException;
-import babel.generic.BaseProtoMessageSerializer;
-import babel.generic.GenericProtocol;
-import babel.generic.ProtoMessage;
-import channel.tcp.MultithreadedTCPChannel;
-import channel.tcp.TCPChannel;
-import channel.tcp.events.*;
+import pt.unl.fct.di.novasys.babel.core.BabelMessageSerializer;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
+import pt.unl.fct.di.novasys.babel.internal.MessageInEvent;
+import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import common.values.AppOpBatch;
 import common.values.NoOpValue;
 import common.values.PaxosValue;
 import frontend.notifications.ExecuteBatchNotification;
 import frontend.notifications.MembershipChange;
 import frontend.timers.InfoTimer;
-import network.Connection;
-import network.listeners.MessageListener;
+import pt.unl.fct.di.novasys.network.Connection;
+import pt.unl.fct.di.novasys.network.listeners.MessageListener;
 import ringpaxos.timers.*;
 import frontend.ipc.SubmitBatchRequest;
 import ringpaxos.messages.*;
 import ringpaxos.utils.*;
 import io.netty.channel.EventLoopGroup;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -32,7 +32,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-public class RingPaxosProto extends GenericProtocol implements MessageListener<ProtoMessage> {
+public class RingPaxosProto extends GenericProtocol implements MessageListener<BabelMessage> {
 
     private static final Logger logger = LogManager.getLogger(RingPaxosProto.class);
 
@@ -117,20 +117,19 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
 
         Properties peerProps = new Properties();
         peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
         peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
-        registerMessageSerializer(AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
-        registerMessageSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
-        registerMessageSerializer(DecidedMsg.MSG_CODE, DecidedMsg.serializer);
-        registerMessageSerializer(DecisionMsg.MSG_CODE, DecisionMsg.serializer);
-        registerMessageSerializer(PrepareMsg.MSG_CODE, PrepareMsg.serializer);
-        registerMessageSerializer(PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
-        registerMessageSerializer(ReqAcceptMsg.MSG_CODE, ReqAcceptMsg.serializer);
-        registerMessageSerializer(ReqDecisionMsg.MSG_CODE, ReqDecisionMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, DecidedMsg.MSG_CODE, DecidedMsg.serializer);
+        registerMessageSerializer(peerChannel, DecisionMsg.MSG_CODE, DecisionMsg.serializer);
+        registerMessageSerializer(peerChannel, PrepareMsg.MSG_CODE, PrepareMsg.serializer);
+        registerMessageSerializer(peerChannel, PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
+        registerMessageSerializer(peerChannel, ReqAcceptMsg.MSG_CODE, ReqAcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, ReqDecisionMsg.MSG_CODE, ReqDecisionMsg.serializer);
 
         registerMessageHandler(peerChannel, AcceptedMsg.MSG_CODE, this::uponAcceptedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
@@ -153,7 +152,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
 
         registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
 
-        BaseProtoMessageSerializer serializer = new BaseProtoMessageSerializer(new ConcurrentHashMap<>());
+        BabelMessageSerializer serializer = new BabelMessageSerializer(new ConcurrentHashMap<>());
         serializer.registerProtoSerializer(AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
         serializer.registerProtoSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
         serializer.registerProtoSerializer(DecidedMsg.MSG_CODE, DecidedMsg.serializer);
@@ -186,13 +185,10 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         lastLeaderOp = System.currentTimeMillis();
 
         logger.info("RingPaxos: " + membership + " qs " + QUORUM_SIZE);
-
-        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
-        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
     @Override
-    public void deliverMessage(ProtoMessage msg, Connection<ProtoMessage> conn) {
+    public void deliverMessage(BabelMessage msg, Connection<BabelMessage> conn) {
         this.deliverMessageIn(new MessageInEvent(msg, null, peerChannel));
     }
 
@@ -323,7 +319,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
             InstanceState aI = instances.get(i);
             assert aI.acceptedValue != null;
             assert aI.highestAccept != null;
-            this.deliverMessageIn(new MessageInEvent(new AcceptMsg(i, currentSN.getValue(), aI.acceptedValue),
+            this.deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptMsg(i, currentSN.getValue(), aI.acceptedValue), (short) -1, (short) -1),
                     self, peerChannel));
         }
         PaxosValue nextOp;
@@ -567,7 +563,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<P
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
+            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short) -1, (short) -1), self, peerChannel));
             else sendMessage(msg, destination);
         }
     }

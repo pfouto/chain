@@ -1,6 +1,6 @@
 package frontend.utils;
 
-import babel.events.InternalEvent;
+import pt.unl.fct.di.novasys.babel.internal.*;
 
 import java.util.Collection;
 import java.util.Iterator;

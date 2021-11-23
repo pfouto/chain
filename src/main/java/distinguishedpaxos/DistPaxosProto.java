@@ -1,34 +1,31 @@
 package distinguishedpaxos;
 
-import babel.events.MessageInEvent;
-import babel.exceptions.HandlerRegistrationException;
-import babel.generic.GenericProtocol;
-import babel.generic.ProtoMessage;
-import channel.tcp.TCPChannel;
+import common.values.AppOpBatch;
 import common.values.NoOpValue;
 import common.values.PaxosValue;
-import distinguishedpaxos.timers.*;
-import channel.tcp.events.*;
 import distinguishedpaxos.messages.*;
-import channel.tcp.MultithreadedTCPChannel;
-import common.values.AppOpBatch;
-import distinguishedpaxos.messages.AcceptMsg;
-import distinguishedpaxos.messages.DecidedMsg;
-import distinguishedpaxos.messages.PrepareMsg;
-import distinguishedpaxos.messages.PrepareOkMsg;
 import distinguishedpaxos.timers.LeaderTimer;
+import distinguishedpaxos.timers.NoOpTimer;
+import distinguishedpaxos.timers.ReconnectTimer;
 import distinguishedpaxos.utils.AcceptedValue;
 import distinguishedpaxos.utils.InstanceState;
 import distinguishedpaxos.utils.Membership;
 import distinguishedpaxos.utils.SeqN;
+import frontend.ipc.SubmitBatchRequest;
 import frontend.notifications.ExecuteBatchNotification;
 import frontend.notifications.MembershipChange;
-import frontend.ipc.SubmitBatchRequest;
-import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
-import network.data.Host;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
+import pt.unl.fct.di.novasys.babel.internal.MessageInEvent;
+import pt.unl.fct.di.novasys.channel.tcp.MultithreadedTCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.events.*;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -38,14 +35,8 @@ import java.util.stream.Collectors;
 
 public class DistPaxosProto extends GenericProtocol {
 
-    private static final Logger logger = LogManager.getLogger(DistPaxosProto.class);
-
     public final static short PROTOCOL_ID = 400;
     public final static String PROTOCOL_NAME = "DistProto";
-
-    private static final int INITIAL_MAP_SIZE = 1000;
-    private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
-
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
     public static final String QUORUM_SIZE_KEY = "quorum_size";
@@ -53,38 +44,29 @@ public class DistPaxosProto extends GenericProtocol {
     public static final String INITIAL_STATE_KEY = "initial_state";
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
-
+    private static final Logger logger = LogManager.getLogger(DistPaxosProto.class);
+    private static final int INITIAL_MAP_SIZE = 1000;
+    private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
     private final int LEADER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
-
-    enum State {ACTIVE}
-
     private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
-
     private final Host self;
     private final State state;
+    private final LinkedList<Host> seeds;
+    private final EventLoopGroup workerGroup;
     private Membership membership;
-
     private int highestAcceptedInstance = -1;
     private int highestDecidedInstance = -1;
     private int lastAcceptSent = -1;
-
     //Leadership
     private Map.Entry<Integer, SeqN> currentSN;
     private boolean amQuorumLeader;
     private long lastAcceptTime;
-
     //Timers
     private long noOpTimer = -1;
-
     private long lastLeaderOp;
-
-    private final LinkedList<Host> seeds;
-
-    private final EventLoopGroup workerGroup;
-
     private int peerChannel;
 
     public DistPaxosProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
@@ -112,18 +94,17 @@ public class DistPaxosProto extends GenericProtocol {
 
         Properties peerProps = new Properties();
         peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
         peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
-        registerMessageSerializer(AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
-        registerMessageSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
-        registerMessageSerializer(DecidedMsg.MSG_CODE, DecidedMsg.serializer);
-        registerMessageSerializer(DecisionMsg.MSG_CODE, DecisionMsg.serializer);
-        registerMessageSerializer(PrepareMsg.MSG_CODE, PrepareMsg.serializer);
-        registerMessageSerializer(PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, DecidedMsg.MSG_CODE, DecidedMsg.serializer);
+        registerMessageSerializer(peerChannel, DecisionMsg.MSG_CODE, DecisionMsg.serializer);
+        registerMessageSerializer(peerChannel, PrepareMsg.MSG_CODE, PrepareMsg.serializer);
+        registerMessageSerializer(peerChannel, PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
 
         registerMessageHandler(peerChannel, AcceptedMsg.MSG_CODE, this::uponAcceptedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
@@ -161,9 +142,6 @@ public class DistPaxosProto extends GenericProtocol {
         lastLeaderOp = System.currentTimeMillis();
 
         logger.info("DistinguishedPaxos: " + membership + " qs " + QUORUM_SIZE);
-
-        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
-        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
 
     }
 
@@ -291,7 +269,7 @@ public class DistPaxosProto extends GenericProtocol {
             InstanceState aI = instances.get(i);
             assert aI.acceptedValue != null;
             assert aI.highestAccept != null;
-            this.deliverMessageIn(new MessageInEvent(new AcceptMsg(i, currentSN.getValue(), aI.acceptedValue),
+            this.deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptMsg(i, currentSN.getValue(), aI.acceptedValue), (short) -1, (short) -1),
                     self, peerChannel));
         }
         lastAcceptSent = highestAcceptedInstance;
@@ -459,7 +437,7 @@ public class DistPaxosProto extends GenericProtocol {
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
+            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(new BabelMessage(msg,(short)-1,(short)-1), self, peerChannel));
             else sendMessage(msg, destination);
         }
     }
@@ -528,4 +506,6 @@ public class DistPaxosProto extends GenericProtocol {
         }
         return peers;
     }
+
+    enum State {ACTIVE}
 }

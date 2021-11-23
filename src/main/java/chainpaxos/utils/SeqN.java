@@ -1,7 +1,7 @@
 package chainpaxos.utils;
 
 import io.netty.buffer.ByteBuf;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
 import java.util.Objects;

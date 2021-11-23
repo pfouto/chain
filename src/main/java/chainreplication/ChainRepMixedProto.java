@@ -1,9 +1,8 @@
 package chainreplication;
 
-import babel.events.MessageInEvent;
-import babel.exceptions.HandlerRegistrationException;
-import babel.generic.GenericProtocol;
-import babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import chainreplication.messages.*;
 import chainreplication.notifications.ReplyBatchNotification;
 import chainreplication.requests.MembershipChangeEvt;
@@ -12,17 +11,17 @@ import chainreplication.timer.ReconnectTimer;
 import chainreplication.utils.Membership;
 import chainreplication.zookeeper.IMembershipListener;
 import chainreplication.zookeeper.ProcessNode;
-import channel.tcp.MultithreadedTCPChannel;
-import channel.tcp.TCPChannel;
-import channel.tcp.events.*;
+import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
+import pt.unl.fct.di.novasys.babel.internal.MessageInEvent;
+import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import common.values.AppOpBatch;
 import frontend.ipc.DeliverSnapshotReply;
 import frontend.ipc.GetSnapshotRequest;
 import frontend.ipc.SubmitBatchRequest;
 import frontend.notifications.*;
-import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -38,38 +37,27 @@ import java.util.stream.Collectors;
 
 public class ChainRepMixedProto extends GenericProtocol implements IMembershipListener {
 
-    private static final Logger logger = LogManager.getLogger(ChainRepMixedProto.class);
-
     public final static short PROTOCOL_ID = 300;
     public final static String PROTOCOL_NAME = "ChainRepMixedProto";
-
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
     public static final String JOIN_TIMEOUT_KEY = "join_timeout";
     public static final String ZOOKEEPER_URL_KEY = "zookeeper_url";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
-
+    private static final Logger logger = LogManager.getLogger(ChainRepMixedProto.class);
     private final int JOIN_TIMEOUT;
     private final int RECONNECT_TIME;
     private final String ZOOKEEPER_URL;
-
-    enum State {JOINING, REGISTERING, ACTIVE}
-
     private final Host self;
-
-    private int peerChannel;
     private final EventLoopGroup workerGroup;
-
+    private final LinkedList<AcceptMsg> sent = new LinkedList<>();
+    private int peerChannel;
     private State state;
     private Membership membership;
     private ProcessNode processNode;
     private int highestAcceptReceived = -1;
     private int highestAcceptSent = -1;
-
-    private final LinkedList<AcceptMsg> sent = new LinkedList<>();
-
     private Host pendingNewTail = null;
-
     //Timers
     private long joinTimer = -1;
 
@@ -93,16 +81,15 @@ public class ChainRepMixedProto extends GenericProtocol implements IMembershipLi
     public void init(Properties props) throws HandlerRegistrationException, IOException {
         Properties peerProps = new Properties();
         peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
         peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
-        registerMessageSerializer(AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
-        registerMessageSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
-        registerMessageSerializer(JoinRequestMsg.MSG_CODE, JoinRequestMsg.serializer);
-        registerMessageSerializer(StateTransferMsg.MSG_CODE, StateTransferMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, JoinRequestMsg.MSG_CODE, JoinRequestMsg.serializer);
+        registerMessageSerializer(peerChannel, StateTransferMsg.MSG_CODE, StateTransferMsg.serializer);
 
         registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
@@ -138,9 +125,6 @@ public class ChainRepMixedProto extends GenericProtocol implements IMembershipLi
         }
 
         logger.info("Starting ChainReplication");
-
-        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
-        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
     private void onJoinTimer(JoinTimer timer, long timerId) {
@@ -379,10 +363,10 @@ public class ChainRepMixedProto extends GenericProtocol implements IMembershipLi
             openConnection(timer.getHost());
     }
 
-
     void sendOrEnqueue(ProtoMessage msg, Host destination) {
         logger.debug("Destination: " + destination);
-        if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
+        if (destination.equals(self))
+            deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short) -1, (short) -1), self, peerChannel));
         else sendMessage(msg, destination);
     }
 
@@ -397,4 +381,6 @@ public class ChainRepMixedProto extends GenericProtocol implements IMembershipLi
     private void uponInConnectionDown(InConnectionDown event, int channel) {
         logger.info(event);
     }
+
+    enum State {JOINING, REGISTERING, ACTIVE}
 }

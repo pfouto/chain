@@ -1,9 +1,9 @@
 package epaxos;
 
-import babel.exceptions.HandlerRegistrationException;
-import channel.tcp.events.OutConnectionDown;
-import channel.tcp.events.OutConnectionFailed;
-import channel.tcp.events.OutConnectionUp;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionDown;
+import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionFailed;
+import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionUp;
 import frontend.FrontendProto;
 import frontend.ipc.SubmitBatchRequest;
 import frontend.network.*;
@@ -15,7 +15,7 @@ import frontend.timers.BatchTimer;
 import frontend.timers.InfoTimer;
 import frontend.utils.OpInfo;
 import io.netty.channel.EventLoopGroup;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
@@ -72,10 +72,6 @@ public class EPaxosFront extends FrontendProto {
         registerTimerHandler(BatchTimer.TIMER_ID, this::handleBatchTimer);
 
         lastBatchTime = System.currentTimeMillis();
-
-        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
-        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
-
     }
 
     /* -------------------- ---------- ----------------------------------------------- */

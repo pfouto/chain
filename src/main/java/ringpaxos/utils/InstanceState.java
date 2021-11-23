@@ -1,7 +1,7 @@
 package ringpaxos.utils;
 
 import common.values.PaxosValue;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.HashMap;
 import java.util.Map;

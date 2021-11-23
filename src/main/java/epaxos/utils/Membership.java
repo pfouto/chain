@@ -1,6 +1,6 @@
 package epaxos.utils;
 
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 

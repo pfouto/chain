@@ -1,6 +1,6 @@
 package chainpaxos.ipc;
 
-import babel.generic.ProtoReply;
+import pt.unl.fct.di.novasys.babel.generic.ProtoReply;
 
 import java.util.Queue;
 

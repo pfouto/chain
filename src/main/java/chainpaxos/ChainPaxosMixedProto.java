@@ -1,17 +1,18 @@
 package chainpaxos;
 
-import babel.events.MessageInEvent;
-import babel.exceptions.HandlerRegistrationException;
-import babel.generic.GenericProtocol;
-import babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import chainpaxos.messages.*;
 import chainpaxos.timers.*;
 import chainpaxos.utils.AcceptedValue;
 import chainpaxos.utils.InstanceState;
 import chainpaxos.utils.Membership;
 import chainpaxos.utils.SeqN;
-import channel.tcp.TCPChannel;
-import channel.tcp.events.*;
+import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
+import pt.unl.fct.di.novasys.babel.internal.MessageInEvent;
+import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import common.values.AppOpBatch;
 import common.values.MembershipOp;
 import common.values.NoOpValue;
@@ -20,9 +21,8 @@ import frontend.ipc.DeliverSnapshotReply;
 import frontend.ipc.GetSnapshotRequest;
 import frontend.ipc.SubmitBatchRequest;
 import frontend.notifications.*;
-import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
@@ -36,11 +36,8 @@ import java.util.stream.Collectors;
 
 public class ChainPaxosMixedProto extends GenericProtocol {
 
-    private static final Logger logger = LogManager.getLogger(ChainPaxosMixedProto.class);
-
     public final static short PROTOCOL_ID = 200;
     public final static String PROTOCOL_NAME = "ChainProtoMixed";
-
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
     public static final String QUORUM_SIZE_KEY = "quorum_size";
@@ -51,47 +48,21 @@ public class ChainPaxosMixedProto extends GenericProtocol {
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
-
+    private static final Logger logger = LogManager.getLogger(ChainPaxosMixedProto.class);
+    private static final int INITIAL_MAP_SIZE = 1000;
     private final int LEADER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
-
     private final int STATE_TRANSFER_TIMEOUT;
     private final int JOIN_TIMEOUT;
-
-    enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
-
     private final Set<Host> establishedConnections = new HashSet<>();
 
     private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
     private final Queue<MembershipOp> waitingMembershipOps = new LinkedList<>();
 
     private final Host self;
-    private Host nextOk;
-    private State state;
-    private Membership membership;
-
-    private static final int INITIAL_MAP_SIZE = 1000;
     private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
-
-    private int highestAcknowledgedInstance = -1;
-    private int highestAcceptedInstance = -1;
-    private int highestDecidedInstance = -1;
-    private int lastAcceptSent = -1;
-
-    //Leadership
-    private Map.Entry<Integer, SeqN> currentSN;
-    private boolean amQuorumLeader;
-    private long lastAcceptTime;
-
-    //Timers
-    private long joinTimer = -1;
-    private long stateTransferTimer = -1;
-    private long noOpTimer = -1;
-
-    private long lastLeaderOp;
-
     //Dynamic membership
     //TODO eventually forget stored states... (irrelevant for experiments)
     //Waiting for application to generate snapshot (boolean represents if we should send as soon as ready)
@@ -100,15 +71,29 @@ public class ChainPaxosMixedProto extends GenericProtocol {
     private final Map<Host, Pair<Integer, byte[]>> storedSnapshots = new HashMap<>();
     //List of JoinSuccess (nodes who generated snapshots for me)
     private final Queue<Host> hostsWithSnapshot = new LinkedList<>();
-
     private final LinkedList<Host> seeds;
-    private int joiningInstance;
     private final Queue<AppOpBatch> bufferedOps = new LinkedList<>();
+    private final EventLoopGroup workerGroup;
+    private Host nextOk;
+    private State state;
+    private Membership membership;
+    private int highestAcknowledgedInstance = -1;
+    private int highestAcceptedInstance = -1;
+    private int highestDecidedInstance = -1;
+    private int lastAcceptSent = -1;
+    //Leadership
+    private Map.Entry<Integer, SeqN> currentSN;
+    private boolean amQuorumLeader;
+    private long lastAcceptTime;
+    //Timers
+    private long joinTimer = -1;
+    private long stateTransferTimer = -1;
+    private long noOpTimer = -1;
+    private long lastLeaderOp;
+    private int joiningInstance;
     private Map.Entry<Integer, byte[]> receivedState = null;
 
     private int peerChannel;
-
-    private final EventLoopGroup workerGroup;
 
     public ChainPaxosMixedProto(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME, PROTOCOL_ID /*, new BetterEventPriorityQueue()*/);
@@ -143,24 +128,23 @@ public class ChainPaxosMixedProto extends GenericProtocol {
     public void init(Properties props) throws HandlerRegistrationException, IOException {
 
         Properties peerProps = new Properties();
-        peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.put(TCPChannel.PORT_KEY, Integer.parseInt(props.getProperty(PORT_KEY)));
+        peerProps.setProperty(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
+        peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
         peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
-        peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
-        registerMessageSerializer(AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
-        registerMessageSerializer(AcceptMsg.MSG_CODE, AcceptMsg.serializer);
-        registerMessageSerializer(DecidedMsg.MSG_CODE, DecidedMsg.serializer);
-        registerMessageSerializer(JoinRequestMsg.MSG_CODE, JoinRequestMsg.serializer);
-        registerMessageSerializer(JoinSuccessMsg.MSG_CODE, JoinSuccessMsg.serializer);
-        registerMessageSerializer(MembershipOpRequestMsg.MSG_CODE, MembershipOpRequestMsg.serializer);
-        registerMessageSerializer(PrepareMsg.MSG_CODE, PrepareMsg.serializer);
-        registerMessageSerializer(PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
-        registerMessageSerializer(StateRequestMsg.MSG_CODE, StateRequestMsg.serializer);
-        registerMessageSerializer(StateTransferMsg.MSG_CODE, StateTransferMsg.serializer);
-        registerMessageSerializer(UnaffiliatedMsg.MSG_CODE, UnaffiliatedMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, DecidedMsg.MSG_CODE, DecidedMsg.serializer);
+        registerMessageSerializer(peerChannel, JoinRequestMsg.MSG_CODE, JoinRequestMsg.serializer);
+        registerMessageSerializer(peerChannel, JoinSuccessMsg.MSG_CODE, JoinSuccessMsg.serializer);
+        registerMessageSerializer(peerChannel, MembershipOpRequestMsg.MSG_CODE, MembershipOpRequestMsg.serializer);
+        registerMessageSerializer(peerChannel, PrepareMsg.MSG_CODE, PrepareMsg.serializer);
+        registerMessageSerializer(peerChannel, PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
+        registerMessageSerializer(peerChannel, StateRequestMsg.MSG_CODE, StateRequestMsg.serializer);
+        registerMessageSerializer(peerChannel, StateTransferMsg.MSG_CODE, StateTransferMsg.serializer);
+        registerMessageSerializer(peerChannel, UnaffiliatedMsg.MSG_CODE, UnaffiliatedMsg.serializer);
 
         registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
@@ -203,9 +187,6 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         }
 
         logger.info("ChainPaxos: " + membership + " qs " + QUORUM_SIZE);
-
-        setupPeriodicTimer(new InfoTimer(), 10000, 10000);
-        registerTimerHandler(InfoTimer.TIMER_ID, this::debugInfo);
     }
 
     private void setupInitialState(List<Host> members, int instanceNumber) {
@@ -345,7 +326,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
     private void uponPrepareMsg(PrepareMsg msg, Host from, short sourceProto, int channel) {
         logger.debug(msg + " : " + from);
         if (msg.iN > highestAcknowledgedInstance) {
-            
+
             assert msg.iN >= currentSN.getKey();
             if (!msg.sN.lesserOrEqualsThan(currentSN.getValue())) {
                 //Accept - Change leader
@@ -417,7 +398,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
 
     private void becomeLeader(int instanceNumber) {
         amQuorumLeader = true;
-        noOpTimer = setupPeriodicTimer(NoOpTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
+        noOpTimer = setupPeriodicTimer(NoOpTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3, 1));
         logger.info("I am leader now! @ instance " + instanceNumber);
 
         //Propagate received accepted ops
@@ -427,8 +408,8 @@ public class ChainPaxosMixedProto extends GenericProtocol {
             assert aI.acceptedValue != null;
             assert aI.highestAccept != null;
             //goes to the end of the queue
-            this.deliverMessageIn(new MessageInEvent(new AcceptMsg(i, currentSN.getValue(), (short) 0,
-                    aI.acceptedValue, highestAcknowledgedInstance), self, peerChannel));
+            this.deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptMsg(i, currentSN.getValue(), (short) 0,
+                    aI.acceptedValue, highestAcknowledgedInstance), (short) -1, (short) -1), self, peerChannel));
         }
         lastAcceptSent = highestAcceptedInstance;
 
@@ -664,7 +645,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         if (membership.contains(event.getNode())) {
             establishedConnections.add(event.getNode());
             if (event.getNode().equals(nextOk))
-                for (int i = highestAcceptedInstance; i <= highestAcknowledgedInstance && i>=0; i++)
+                for (int i = highestAcceptedInstance; i <= highestAcknowledgedInstance && i >= 0; i++)
                     forward(instances.get(i));
         }
     }
@@ -703,8 +684,6 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         logger.info(event);
     }
 
-    // ----------------------- Utils ------------------------------------
-
     private void decideAndExecute(InstanceState instance) {
         assert highestDecidedInstance == instance.iN - 1;
         assert !instance.isDecided();
@@ -725,6 +704,8 @@ public class ChainPaxosMixedProto extends GenericProtocol {
             throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
         }
     }
+
+    // ----------------------- Utils ------------------------------------
 
     private void executeMembershipOp(InstanceState instance) {
         MembershipOp o = (MembershipOp) instance.acceptedValue;
@@ -799,18 +780,21 @@ public class ChainPaxosMixedProto extends GenericProtocol {
 
     void sendOrEnqueue(ProtoMessage msg, Host destination) {
         logger.debug("Destination: " + destination);
-        if(msg == null || destination == null){
+        if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(msg, self, peerChannel));
+            if (destination.equals(self))
+                deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short) -1, (short) -1), self, peerChannel));
             else sendMessage(msg, destination);
         }
     }
 
-    private void triggerMembershipChangeNotification(){
+    private void triggerMembershipChangeNotification() {
         triggerNotification(new MembershipChange(
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                 null, supportedLeader().getAddress(),
-                membership.nodeAt(membership.size()/2).getAddress()));
+                membership.nodeAt(membership.size() / 2).getAddress()));
     }
+
+    enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
 }

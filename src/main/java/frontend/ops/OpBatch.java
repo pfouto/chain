@@ -1,7 +1,7 @@
 package frontend.ops;
 
 import io.netty.buffer.ByteBuf;
-import network.ISerializer;
+import pt.unl.fct.di.novasys.network.ISerializer;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;

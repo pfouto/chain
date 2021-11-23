@@ -1,9 +1,9 @@
 package frontend.network;
 
-import babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import frontend.ops.OpBatch;
 import io.netty.buffer.ByteBuf;
-import network.ISerializer;
+import pt.unl.fct.di.novasys.network.ISerializer;
 
 import java.io.IOException;
 

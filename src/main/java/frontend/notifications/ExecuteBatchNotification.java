@@ -1,6 +1,6 @@
 package frontend.notifications;
 
-import babel.generic.ProtoNotification;
+import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
 import frontend.ops.OpBatch;
 
 public class ExecuteBatchNotification extends ProtoNotification {

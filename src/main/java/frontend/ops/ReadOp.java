@@ -1,7 +1,7 @@
 package frontend.ops;
 
 import io.netty.buffer.ByteBuf;
-import network.data.Host;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.Arrays;
 import java.util.Objects;

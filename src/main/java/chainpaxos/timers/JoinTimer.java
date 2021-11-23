@@ -1,6 +1,6 @@
 package chainpaxos.timers;
 
-import babel.generic.ProtoTimer;
+import pt.unl.fct.di.novasys.babel.generic.ProtoTimer;
 
 public class JoinTimer extends ProtoTimer {
 

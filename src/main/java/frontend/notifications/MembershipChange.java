@@ -1,6 +1,6 @@
 package frontend.notifications;
 
-import babel.generic.ProtoNotification;
+import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
 
 import java.net.InetAddress;
 import java.util.List;
