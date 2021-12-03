@@ -1,9 +1,6 @@
-package frontend.ipc;
+package chainpaxos.ipc;
 
-import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
 import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
-import frontend.ops.OpBatch;
-import frontend.ops.ReadOp;
 
 public class SubmitReadRequest extends ProtoRequest {
 

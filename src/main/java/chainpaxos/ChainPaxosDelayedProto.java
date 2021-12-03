@@ -1,5 +1,6 @@
 package chainpaxos;
 
+import chainpaxos.ipc.ExecuteReadReply;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
@@ -20,9 +21,8 @@ import common.values.PaxosValue;
 import frontend.ipc.DeliverSnapshotReply;
 import frontend.ipc.GetSnapshotRequest;
 import frontend.ipc.SubmitBatchRequest;
-import frontend.ipc.SubmitReadRequest;
+import chainpaxos.ipc.SubmitReadRequest;
 import frontend.notifications.*;
-import frontend.timers.InfoTimer;
 import io.netty.channel.EventLoopGroup;
 import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.commons.lang3.tuple.MutablePair;
@@ -598,7 +598,6 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
         for (int i = highestAcknowledgedInstance + 1; i <= instanceN; i++) {
             InstanceState ins = instances.remove(i);
             ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v), k));
-            //ins.getAttachedReads().forEach((k, v) -> sendReply(new ReplyReadReply(v), k));
 
             assert ins.isDecided();
             highestAcknowledgedInstance++;

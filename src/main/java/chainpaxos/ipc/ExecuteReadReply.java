@@ -1,4 +1,4 @@
-package frontend.notifications;
+package chainpaxos.ipc;
 
 import pt.unl.fct.di.novasys.babel.generic.ProtoReply;
 
