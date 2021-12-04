@@ -151,7 +151,7 @@ public class HashMapApp implements Application {
                     .childOption(ChannelOption.SO_KEEPALIVE, true);
 
             ChannelFuture f = b.bind(port).sync();
-            logger.info("Listening: " + f.channel());
+            logger.info("Listening: " + f.channel().localAddress());
             f.channel().closeFuture().sync();
             logger.info("Server channel closed");
         } finally {
@@ -212,7 +212,8 @@ public class HashMapApp implements Application {
                 opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), new byte[0]));
         } else { //READ
             if (local) {
-                opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), store.get(op.getRequestKey())));
+                opInfo.getRight().writeAndFlush(
+                        new ResponseMessage(opInfo.getLeft(), store.getOrDefault(op.getRequestKey(), new byte[0])));
             } //If remote read, nothing to do
         }
     }
