@@ -1,5 +1,7 @@
 package app.networking;
 
+import java.util.Arrays;
+
 public class RequestMessage {
 
     public final static byte WRITE = 0;
@@ -32,5 +34,15 @@ public class RequestMessage {
 
     public int getcId() {
         return cId;
+    }
+
+    @Override
+    public String toString() {
+        return "RequestMessage{" +
+                "cId=" + cId +
+                ", requestType=" + requestType +
+                ", requestKey='" + requestKey + '\'' +
+                ", requestValueSize=" + requestValue.length +
+                '}';
     }
 }

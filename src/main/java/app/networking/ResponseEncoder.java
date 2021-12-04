@@ -6,6 +6,7 @@ import io.netty.handler.codec.MessageToByteEncoder;
 
 public class ResponseEncoder extends MessageToByteEncoder<ResponseMessage> {
 
+
     @Override
     protected void encode(ChannelHandlerContext ctx, ResponseMessage msg, ByteBuf out) throws Exception {
         out.writeInt(msg.getcId());

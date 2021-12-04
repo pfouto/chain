@@ -37,13 +37,16 @@ import ringpaxos.RingPaxosPiggyProto;
 import ringpaxos.RingPaxosProto;
 
 import java.io.*;
-import java.net.*;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class HashMapApp extends ChannelInboundHandlerAdapter implements Application {
+public class HashMapApp implements Application {
 
     private static final Logger logger = LogManager.getLogger(HashMapApp.class);
     private final ConcurrentMap<Integer, Pair<Integer, Channel>> opMapper;
@@ -141,14 +144,16 @@ public class HashMapApp extends ChannelInboundHandlerAdapter implements Applicat
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         @Override
-                        public void initChannel(SocketChannel ch) throws Exception {
-                            ch.pipeline().addLast(new RequestDecoder(), new ResponseEncoder(), this);
+                        public void initChannel(SocketChannel ch) {
+                            ch.pipeline().addLast(new RequestDecoder(), new ResponseEncoder(), new ServerHandler());
                         }
                     }).option(ChannelOption.SO_BACKLOG, 128)
                     .childOption(ChannelOption.SO_KEEPALIVE, true);
 
             ChannelFuture f = b.bind(port).sync();
+            logger.info("Listening: " + f.channel());
             f.channel().closeFuture().sync();
+            logger.info("Server channel closed");
         } finally {
             workerGroup.shutdownGracefully();
             bossGroup.shutdownGracefully();
@@ -159,7 +164,7 @@ public class HashMapApp extends ChannelInboundHandlerAdapter implements Applicat
     public static void main(String[] args) throws InvalidParameterException, IOException,
             HandlerRegistrationException, ProtocolAlreadyExistsException, InterruptedException {
         Properties configProps =
-                Babel.loadConfig(Arrays.copyOfRange(args, 1, args.length), "config.properties");
+                Babel.loadConfig(Arrays.copyOfRange(args, 0, args.length), "config.properties");
         logger.debug(configProps);
         if (configProps.containsKey("interface")) {
             String address = getAddress(configProps.getProperty("interface"));
@@ -187,28 +192,6 @@ public class HashMapApp extends ChannelInboundHandlerAdapter implements Applicat
         return null;
     }
 
-    //Called by netty threads
-    @Override
-    public void channelActive(ChannelHandlerContext ctx) throws Exception {
-        logger.info("Client connected: " + ctx.channel().remoteAddress());
-    }
-
-    //Called by netty threads
-    @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        RequestMessage rMsg = (RequestMessage) msg;
-        if (rMsg.getRequestType() == RequestMessage.WEAK_READ) { //Exec immediately and respond
-            byte[] bytes = store.get(rMsg.getRequestKey());
-            ctx.channel().write(new ResponseMessage(rMsg.getcId(), bytes == null ? new byte[0] : bytes));
-        } else { //Submit to consensus
-            int id = idCounter.incrementAndGet();
-            opMapper.put(id, Pair.of(rMsg.getcId(), ctx.channel()));
-            byte[] opData = HashMapOp.toByteArray(id, rMsg.getRequestType(), rMsg.getRequestKey(), rMsg.getRequestValue());
-            frontendProtos.get(0).submitOperation(opData, rMsg.getRequestType() == RequestMessage.WRITE ?
-                    FrontendProto.OpType.WRITE : FrontendProto.OpType.STRONG_READ);
-        }
-    }
-
     //Called by **single** frontend thread
     @Override
     public void executeOperation(byte[] opData, boolean local) {
@@ -219,15 +202,17 @@ public class HashMapApp extends ChannelInboundHandlerAdapter implements Applicat
             logger.error("Error decoding opData", e);
             throw new AssertionError("Error decoding opData");
         }
+        //logger.info("Exec op: " + op + (local ? "local" : ""));
+
         Pair<Integer, Channel> opInfo = local ? opMapper.remove(op.getId()) : null;
         if (op.getRequestType() == RequestMessage.WRITE) {
             store.put(op.getRequestKey(), op.getRequestValue());
             nWrites++;
             if (local)
-                opInfo.getRight().write(new ResponseMessage(opInfo.getLeft(), new byte[0]));
+                opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), new byte[0]));
         } else { //READ
             if (local) {
-                opInfo.getRight().write(new ResponseMessage(opInfo.getLeft(), store.get(op.getRequestKey())));
+                opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), store.get(op.getRequestKey())));
             } //If remote read, nothing to do
         }
     }
@@ -271,6 +256,51 @@ public class HashMapApp extends ChannelInboundHandlerAdapter implements Applicat
             logger.error(e.getMessage());
             throw new AssertionError();
         }
+    }
+
+    class ServerHandler extends ChannelInboundHandlerAdapter {
+        //Called by netty threads
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) throws Exception {
+            logger.info("Client connected: " + ctx.channel().remoteAddress());
+            ctx.fireChannelActive();
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) {
+            logger.info("Client connection lost: " + ctx.channel().remoteAddress());
+            ctx.fireChannelInactive();
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+            logger.error("Exception caught.", cause);
+            ctx.fireExceptionCaught(cause);
+        }
+
+        @Override
+        public void userEventTriggered(ChannelHandlerContext ctx, Object evt) {
+            logger.info("Unexpected event: " + evt);
+            ctx.fireUserEventTriggered(evt);
+        }
+
+        //Called by netty threads
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            RequestMessage rMsg = (RequestMessage) msg;
+            //logger.info("Client op: " + msg);
+            if (rMsg.getRequestType() == RequestMessage.WEAK_READ) { //Exec immediately and respond
+                byte[] bytes = store.get(rMsg.getRequestKey());
+                ctx.channel().writeAndFlush(new ResponseMessage(rMsg.getcId(), bytes == null ? new byte[0] : bytes));
+            } else { //Submit to consensus
+                int id = idCounter.incrementAndGet();
+                opMapper.put(id, Pair.of(rMsg.getcId(), ctx.channel()));
+                byte[] opData = HashMapOp.toByteArray(id, rMsg.getRequestType(), rMsg.getRequestKey(), rMsg.getRequestValue());
+                frontendProtos.get(0).submitOperation(opData, rMsg.getRequestType() == RequestMessage.WRITE ?
+                        FrontendProto.OpType.WRITE : FrontendProto.OpType.STRONG_READ);
+            }
+        }
+
     }
 
 }

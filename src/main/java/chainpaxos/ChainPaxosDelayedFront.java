@@ -39,6 +39,8 @@ public class ChainPaxosDelayedFront extends FrontendProto {
     //Forwarded
     private final Queue<Pair<Long, OpBatch>> pendingWrites;
     private final Queue<Pair<Long, List<byte[]>>> pendingReads;
+    private final Object readLock = new Object();
+    private final Object writeLock = new Object();
     private Host writesTo;
     private boolean writesToConnected;
     private long lastWriteBatchTime;
@@ -85,14 +87,18 @@ public class ChainPaxosDelayedFront extends FrontendProto {
     public void submitOperation(byte[] op, OpType type) {
         switch (type) {
             case STRONG_READ:
-                readDataBuffer.add(op);
-                if (readDataBuffer.size() == LOCAL_BATCH_SIZE)
-                    sendNewReadBatch();
+                synchronized (readLock) {
+                    readDataBuffer.add(op);
+                    if (readDataBuffer.size() == LOCAL_BATCH_SIZE)
+                        sendNewReadBatch();
+                }
                 break;
             case WRITE:
-                writeDataBuffer.add(op);
-                if (writeDataBuffer.size() == BATCH_SIZE)
-                    sendNewWriteBatch();
+                synchronized (writeLock) {
+                    writeDataBuffer.add(op);
+                    if (writeDataBuffer.size() == BATCH_SIZE)
+                        sendNewWriteBatch();
+                }
                 break;
         }
     }
@@ -112,19 +118,21 @@ public class ChainPaxosDelayedFront extends FrontendProto {
     private void handleBatchTimer(BatchTimer timer, long l) {
         long currentTime = System.currentTimeMillis();
         //Send read buffer
-        if (((lastReadBatchTime + LOCAL_BATCH_INTERVAL) < currentTime) && !readDataBuffer.isEmpty()) {
-            logger.warn("Sending read batch by timeout, size " + readDataBuffer.size());
-            if (readDataBuffer.size() > LOCAL_BATCH_SIZE)
-                throw new IllegalStateException("Read batch too big " + readDataBuffer.size() + "/" + LOCAL_BATCH_SIZE);
-            sendNewReadBatch();
-        }
+        if ((lastReadBatchTime + LOCAL_BATCH_INTERVAL) < currentTime)
+            synchronized (readLock) {
+                if (!readDataBuffer.isEmpty()) {
+                    logger.warn("Sending read batch by timeout, size " + readDataBuffer.size());
+                    sendNewReadBatch();
+                }
+            }
         //Check if write buffer timed out
-        if (((lastWriteBatchTime + BATCH_INTERVAL) < currentTime) && !writeDataBuffer.isEmpty()) {
-            logger.warn("Sending write batch by timeout, size " + writeDataBuffer.size());
-            if (writeDataBuffer.size() > BATCH_SIZE)
-                throw new IllegalStateException("Write batch too big " + writeDataBuffer.size() + "/" + BATCH_SIZE);
-            sendNewWriteBatch();
-        }
+        if ((lastWriteBatchTime + BATCH_INTERVAL) < currentTime)
+            synchronized (writeLock) {
+                if (!writeDataBuffer.isEmpty()) {
+                    logger.warn("Sending write batch by timeout, size " + writeDataBuffer.size());
+                    sendNewWriteBatch();
+                }
+            }
     }
 
     private void sendNewReadBatch() {
@@ -178,7 +186,7 @@ public class ChainPaxosDelayedFront extends FrontendProto {
 
     private void sendBatchToWritesTo(PeerBatchMessage msg) {
         if (writesTo.getAddress().equals(self)) onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
-        else if(writesToConnected) sendMessage(peerChannel, msg, writesTo);
+        else if (writesToConnected) sendMessage(peerChannel, msg, writesTo);
     }
 
     /* -------------------- ------------- ----------------------------------------------- */

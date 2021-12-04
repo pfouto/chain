@@ -29,11 +29,11 @@ public class ChainPaxosMixedFront extends FrontendProto {
     private static final Logger logger = LogManager.getLogger(ChainPaxosMixedFront.class);
     private final int BATCH_INTERVAL;
     private final int BATCH_SIZE;
+    //Forwarded
+    private final Queue<Pair<Long, OpBatch>> pendingBatches;
     private long lastBatchTime;
     private Host writesTo;
     private boolean writesToConnected;
-    //Forwarded
-    private final Queue<Pair<Long, OpBatch>> pendingBatches;
     //ToForward
     private List<byte[]> opDataBuffer;
 
@@ -63,9 +63,11 @@ public class ChainPaxosMixedFront extends FrontendProto {
     /* -------------------- ---------- ----------------------------------------------- */
     @Override
     public void submitOperation(byte[] op, OpType type) {
-        opDataBuffer.add(op);
-        if (opDataBuffer.size() == BATCH_SIZE)
-            sendNewBatch();
+        synchronized (this) {
+            opDataBuffer.add(op);
+            if (opDataBuffer.size() == BATCH_SIZE)
+                sendNewBatch();
+        }
     }
 
     /* -------------------- -------- ----------------------------------------------- */
@@ -81,12 +83,13 @@ public class ChainPaxosMixedFront extends FrontendProto {
     /* -------------------- -------- ----------------------------------------------- */
 
     private void handleBatchTimer(BatchTimer timer, long l) {
-        long currentTime = System.currentTimeMillis();
-        if (((lastBatchTime + BATCH_INTERVAL) < currentTime) && !opDataBuffer.isEmpty()) {
-            logger.warn("Sending batch by timeout, size " + opDataBuffer.size());
-            if (opDataBuffer.size() > BATCH_SIZE)
-                throw new IllegalStateException("Batch too big " + opDataBuffer.size() + "/" + BATCH_SIZE);
-            sendNewBatch();
+        if (((lastBatchTime + BATCH_INTERVAL) < System.currentTimeMillis())) {
+            synchronized (this) {
+                if (!opDataBuffer.isEmpty()) {
+                    logger.warn("Sending batch by timeout, size " + opDataBuffer.size());
+                    sendNewBatch();
+                }
+            }
         }
     }
 

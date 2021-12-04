@@ -3,6 +3,7 @@ package app;
 import app.networking.RequestMessage;
 
 import java.io.*;
+import java.util.Arrays;
 
 public class HashMapOp {
 
@@ -65,5 +66,15 @@ public class HashMapOp {
             out.write(requestValue);
         }
         return baos.toByteArray();
+    }
+
+    @Override
+    public String toString() {
+        return "HashMapOp{" +
+                "id=" + id +
+                ", requestType=" + requestType +
+                ", requestKey='" + requestKey + '\'' +
+                ", requestValueSize=" + requestValue.length +
+                '}';
     }
 }

@@ -1,22 +1,20 @@
 package app.networking;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ReplayingDecoder;
-import io.netty.util.concurrent.EventExecutorGroup;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-public class RequestDecoder extends ReplayingDecoder<RequestDecoder.RequestDecodedState> {
+public class RequestDecoder extends ReplayingDecoder<RequestDecoder.RequestDecoderState> {
 
     private int cId;
     private byte requestType;
     private String requestKey;
 
     public RequestDecoder() {
-        super(RequestDecodedState.READ_CID);
+        super(RequestDecoderState.READ_CID);
     }
 
     @Override
@@ -24,14 +22,16 @@ public class RequestDecoder extends ReplayingDecoder<RequestDecoder.RequestDecod
         switch (state()) {
             case READ_CID:
                 cId = in.readInt();
-                checkpoint(RequestDecodedState.READ_TYPE);
+                checkpoint(RequestDecoderState.READ_TYPE);
             case READ_TYPE:
                 requestType = in.readByte();
-                checkpoint(RequestDecodedState.READ_KEY);
+                checkpoint(RequestDecoderState.READ_KEY);
             case READ_KEY:
                 int keyLen = in.readInt();
-                requestKey = in.readCharSequence(keyLen, StandardCharsets.UTF_8).toString();
-                checkpoint(RequestDecodedState.READ_VALUE);
+                byte[] keyBytes = new byte[keyLen];
+                in.readBytes(keyBytes);
+                requestKey = new String(keyBytes, StandardCharsets.UTF_8);
+                checkpoint(RequestDecoderState.READ_VALUE);
             case READ_VALUE:
                 byte[] requestValue;
                 if (requestType == RequestMessage.WRITE) {
@@ -41,7 +41,7 @@ public class RequestDecoder extends ReplayingDecoder<RequestDecoder.RequestDecod
                 } else {
                     requestValue = new byte[0];
                 }
-                checkpoint(RequestDecodedState.READ_TYPE);
+                checkpoint(RequestDecoderState.READ_CID);
                 out.add(new RequestMessage(cId, requestType, requestKey, requestValue));
                 break;
             default:
@@ -49,7 +49,7 @@ public class RequestDecoder extends ReplayingDecoder<RequestDecoder.RequestDecod
         }
     }
 
-    public enum RequestDecodedState {
+    public enum RequestDecoderState {
         READ_CID,
         READ_TYPE,
         READ_KEY,

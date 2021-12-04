@@ -63,10 +63,13 @@ public class RingPaxosFront extends FrontendProto {
     /* -------------------- ---------- ----------------------------------------------- */
     @Override
     public void submitOperation(byte[] op, OpType type) {
-        opDataBuffer.add(op);
-        if (opDataBuffer.size() == BATCH_SIZE)
-            sendNewBatch();
+        synchronized (this) {
+            opDataBuffer.add(op);
+            if (opDataBuffer.size() == BATCH_SIZE)
+                sendNewBatch();
+        }
     }
+
 
     /* -------------------- -------- ----------------------------------------------- */
     /* -------------------- PEER OPS ----------------------------------------------- */
@@ -81,13 +84,13 @@ public class RingPaxosFront extends FrontendProto {
     /* -------------------- -------- ----------------------------------------------- */
 
     private void handleBatchTimer(BatchTimer timer, long l) {
-
-        long currentTime = System.currentTimeMillis();
-        if (((lastBatchTime + BATCH_INTERVAL) < currentTime) && !opDataBuffer.isEmpty()) {
-            logger.warn("Sending batch by timeout, size " + opDataBuffer.size());
-            if (opDataBuffer.size() > BATCH_SIZE)
-                throw new IllegalStateException("Batch too big " + opDataBuffer.size() + "/" + BATCH_SIZE);
-            sendNewBatch();
+        if (((lastBatchTime + BATCH_INTERVAL) < System.currentTimeMillis())) {
+            synchronized (this) {
+                if (!opDataBuffer.isEmpty()) {
+                    logger.warn("Sending batch by timeout, size " + opDataBuffer.size());
+                    sendNewBatch();
+                }
+            }
         }
     }
 
