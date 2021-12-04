@@ -21,6 +21,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Collectors;
 
 public class ChainPaxosDelayedFront extends FrontendProto {
@@ -65,8 +66,8 @@ public class ChainPaxosDelayedFront extends FrontendProto {
         writeDataBuffer = new ArrayList<>(BATCH_SIZE);
         readDataBuffer = new ArrayList<>(LOCAL_BATCH_SIZE);
 
-        pendingWrites = new LinkedList<>();
-        pendingReads = new LinkedList<>();
+        pendingWrites = new ConcurrentLinkedQueue<>();
+        pendingReads = new ConcurrentLinkedQueue<>();
     }
 
     @Override
@@ -196,7 +197,8 @@ public class ChainPaxosDelayedFront extends FrontendProto {
         if ((not.getBatch().getIssuer().equals(self)) && (not.getBatch().getFrontendId() == getProtoId())) {
             Pair<Long, OpBatch> ops = pendingWrites.poll();
             if (ops == null || ops.getLeft() != not.getBatch().getBatchId()) {
-                logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
+                logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + ops + "\n" +
+                        pendingWrites.stream().map(Pair::getKey).collect(Collectors.toList()));
                 throw new AssertionError("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
             }
             not.getBatch().getOps().forEach(op -> app.executeOperation(op, true));

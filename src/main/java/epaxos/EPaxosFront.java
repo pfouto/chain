@@ -19,6 +19,8 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class EPaxosFront extends FrontendProto {
 
@@ -40,7 +42,7 @@ public class EPaxosFront extends FrontendProto {
     private List<byte[]> opDataBuffer;
 
     //Forwarded
-    private final Map<Long, OpBatch> pendingBatches;
+    private final ConcurrentMap<Long, OpBatch> pendingBatches;
 
     public EPaxosFront(Properties props, short protoIndex, Application app) throws IOException {
         super(PROTOCOL_NAME_BASE + protoIndex, (short) (PROTOCOL_ID_BASE + protoIndex),
@@ -52,7 +54,7 @@ public class EPaxosFront extends FrontendProto {
         writesTo = null;
         opDataBuffer = new ArrayList<>(BATCH_SIZE);
 
-        pendingBatches = new HashMap<>();
+        pendingBatches = new ConcurrentHashMap<>();
     }
 
     @Override

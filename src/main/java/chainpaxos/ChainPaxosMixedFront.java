@@ -19,6 +19,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class ChainPaxosMixedFront extends FrontendProto {
 
@@ -48,7 +49,7 @@ public class ChainPaxosMixedFront extends FrontendProto {
         writesToConnected = false;
 
         opDataBuffer = new ArrayList<>(BATCH_SIZE);
-        pendingBatches = new LinkedList<>();
+        pendingBatches = new ConcurrentLinkedDeque<>();
     }
 
     @Override

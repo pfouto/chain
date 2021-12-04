@@ -20,6 +20,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class RingPaxosFront extends FrontendProto {
 
@@ -47,7 +48,7 @@ public class RingPaxosFront extends FrontendProto {
         writesTo = null;
         opDataBuffer = new ArrayList<>(BATCH_SIZE);
 
-        pendingBatches = new LinkedList<>();
+        pendingBatches = new ConcurrentLinkedQueue<>();
     }
 
     @Override
