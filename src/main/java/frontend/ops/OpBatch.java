@@ -57,13 +57,12 @@ public class OpBatch {
         OpBatch opBatch = (OpBatch) o;
         return batchId == opBatch.batchId &&
                 frontendId == opBatch.frontendId &&
-                Objects.equals(issuer, opBatch.issuer) &&
-                Objects.equals(ops, opBatch.ops);
+                Objects.equals(issuer, opBatch.issuer);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(batchId, issuer, frontendId, ops);
+        return Objects.hash(batchId, issuer, frontendId);
     }
 
     public static ISerializer<OpBatch> serializer = new ISerializer<>() {

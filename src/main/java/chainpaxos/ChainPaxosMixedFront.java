@@ -3,6 +3,8 @@ package chainpaxos;
 import app.Application;
 import org.apache.commons.lang3.tuple.Pair;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
+import pt.unl.fct.di.novasys.babel.handlers.NotificationHandler;
 import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionDown;
 import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionFailed;
 import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionUp;
@@ -152,9 +154,9 @@ public class ChainPaxosMixedFront extends FrontendProto {
                 logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
                 throw new AssertionError("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
             }
-            not.getBatch().getOps().forEach(op -> app.executeOperation(op, true));
+            not.getBatch().getOps().forEach(op -> app.executeOperation(op, true, not.getInstId()));
         } else {
-            not.getBatch().getOps().forEach(op -> app.executeOperation(op, false));
+            not.getBatch().getOps().forEach(op -> app.executeOperation(op, false, not.getInstId()));
         }
     }
 

@@ -52,7 +52,7 @@ public class HashMapApp implements Application {
     private final ConcurrentMap<Integer, Pair<Integer, Channel>> opMapper;
     private final AtomicInteger idCounter;
     private final List<FrontendProto> frontendProtos;
-    private int nWrites;
+    private int nWrites,nReads;
     private ConcurrentMap<String, byte[]> store;
 
     public HashMapApp(Properties configProps) throws IOException, ProtocolAlreadyExistsException,
@@ -136,6 +136,13 @@ public class HashMapApp implements Application {
 
         babel.start();
 
+        Runtime.getRuntime().addShutdownHook( new Thread(new Runnable() {
+            @Override
+            public void run() {
+                logger.info("Writes: " + nWrites + ", reads: " + nReads);
+            }
+        }));
+
         EventLoopGroup bossGroup = new NioEventLoopGroup();
         EventLoopGroup workerGroup = new NioEventLoopGroup();
         try {
@@ -151,7 +158,7 @@ public class HashMapApp implements Application {
                     .childOption(ChannelOption.SO_KEEPALIVE, true);
 
             ChannelFuture f = b.bind(port).sync();
-            logger.info("Listening: " + f.channel().localAddress());
+            logger.debug("Listening: " + f.channel().localAddress());
             f.channel().closeFuture().sync();
             logger.info("Server channel closed");
         } finally {
@@ -194,7 +201,7 @@ public class HashMapApp implements Application {
 
     //Called by **single** frontend thread
     @Override
-    public void executeOperation(byte[] opData, boolean local) {
+    public void executeOperation(byte[] opData, boolean local, long instId) {
         HashMapOp op;
         try {
             op = HashMapOp.fromByteArray(opData);
@@ -212,6 +219,7 @@ public class HashMapApp implements Application {
                 opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), new byte[0]));
         } else { //READ
             if (local) {
+                nReads++;
                 opInfo.getRight().writeAndFlush(
                         new ResponseMessage(opInfo.getLeft(), store.getOrDefault(op.getRequestKey(), new byte[0])));
             } //If remote read, nothing to do
@@ -240,7 +248,7 @@ public class HashMapApp implements Application {
     }
 
     @Override
-    public byte[] getState() {
+    public byte[] getSnapshot() {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(baos);
@@ -263,13 +271,13 @@ public class HashMapApp implements Application {
         //Called by netty threads
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
-            logger.info("Client connected: " + ctx.channel().remoteAddress());
+            logger.debug("Client connected: " + ctx.channel().remoteAddress());
             ctx.fireChannelActive();
         }
 
         @Override
         public void channelInactive(ChannelHandlerContext ctx) {
-            logger.info("Client connection lost: " + ctx.channel().remoteAddress());
+            logger.debug("Client connection lost: " + ctx.channel().remoteAddress());
             ctx.fireChannelInactive();
         }
 

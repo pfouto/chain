@@ -162,9 +162,9 @@ public class EPaxosFront extends FrontendProto {
                 logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + null);
                 throw new AssertionError("Expected " + not.getBatch().getBatchId() + ". Got " + null);
             }
-            not.getBatch().getOps().forEach(op -> app.executeOperation(op, true));
+            not.getBatch().getOps().forEach(op -> app.executeOperation(op, true, not.getInstId()));
         }else {
-            not.getBatch().getOps().forEach(op -> app.executeOperation(op, false));
+            not.getBatch().getOps().forEach(op -> app.executeOperation(op, false, not.getInstId()));
         }
     }
 

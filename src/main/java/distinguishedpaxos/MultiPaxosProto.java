@@ -103,14 +103,12 @@ public class MultiPaxosProto extends GenericProtocol {
         registerMessageSerializer(peerChannel, AcceptedMsg.MSG_CODE, AcceptedMsg.serializer);
         registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
         registerMessageSerializer(peerChannel, DecidedMsg.MSG_CODE, DecidedMsg.serializer);
-        registerMessageSerializer(peerChannel, DecisionMsg.MSG_CODE, DecisionMsg.serializer);
         registerMessageSerializer(peerChannel, PrepareMsg.MSG_CODE, PrepareMsg.serializer);
         registerMessageSerializer(peerChannel, PrepareOkMsg.MSG_CODE, PrepareOkMsg.serializer);
 
         registerMessageHandler(peerChannel, AcceptedMsg.MSG_CODE, this::uponAcceptedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, DecidedMsg.MSG_CODE, this::uponDecidedMsg, this::uponMessageFailed);
-        registerMessageHandler(peerChannel, DecisionMsg.MSG_CODE, this::uponDecisionMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, PrepareMsg.MSG_CODE, this::uponPrepareMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, PrepareOkMsg.MSG_CODE, this::uponPrepareOkMsg, this::uponMessageFailed);
 
@@ -376,26 +374,6 @@ public class MultiPaxosProto extends GenericProtocol {
         }
     }
 
-    private void uponDecisionMsg(DecisionMsg msg, Host from, short sourceProto, int channel) {
-        InstanceState instance = instances.computeIfAbsent(msg.iN, InstanceState::new);
-
-        if (instance.isDecided()) {
-            assert instance.acceptedValue.equals(msg.value);
-            //logger.warn("Ignoring msg: " + msg);
-            //TODO eventually forget values (when receiving decision from everyone?) (irrelevant for experiments)
-        } else {
-            assert msg.sN.greaterThan(instance.highestAccept) || instance.acceptedValue.equals(msg.value);
-            highestAcceptedInstance = Math.max(highestAcceptedInstance, instance.iN);
-            instance.registerPeerDecision(msg.sN, msg.value);
-            maybeDecideAndExecute(instance.iN);
-        }
-        instance.nodesDecided++;
-        if (instance.nodesDecided == membership.size()) {
-            instances.remove(msg.iN);
-        }
-        lastLeaderOp = System.currentTimeMillis();
-    }
-
     private void maybeDecideAndExecute(int instanceNumber) {
         if (instanceNumber != highestDecidedInstance + 1)
             return;
@@ -405,8 +383,6 @@ public class MultiPaxosProto extends GenericProtocol {
         while (instance.isPeerDecided() || instance.getAccepteds() >= QUORUM_SIZE) {
             assert !instance.isDecided();
             decideAndExecute(instance);
-            DecisionMsg dMsg = new DecisionMsg(instance.iN, instance.highestAccept, instance.acceptedValue);
-            membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(h -> sendOrEnqueue(dMsg, h));
             instance = instances.computeIfAbsent(highestDecidedInstance + 1, InstanceState::new);
         }
     }

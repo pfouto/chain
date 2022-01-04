@@ -10,7 +10,6 @@ import frontend.ipc.DeliverSnapshotReply;
 import frontend.ipc.GetSnapshotRequest;
 import frontend.network.*;
 import frontend.notifications.*;
-import io.netty.channel.EventLoopGroup;
 import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -120,7 +119,7 @@ public abstract class FrontendProto extends GenericProtocol {
     }
 
     public void onGetStateSnapshot(GetSnapshotRequest not, short from) {
-        byte[] state = app.getState();
+        byte[] state = app.getSnapshot();
         sendReply(new DeliverSnapshotReply(not.getSnapshotTarget(),
                 not.getSnapshotInstance(), state), from);
     }
@@ -129,7 +128,7 @@ public abstract class FrontendProto extends GenericProtocol {
 
     protected abstract void onMembershipChange(MembershipChange notification, short emitterId);
 
-    private void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
+    public void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
         logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
     }
 

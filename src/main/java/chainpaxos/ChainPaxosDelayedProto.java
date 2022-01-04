@@ -597,7 +597,7 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
         //For everyone
         for (int i = highestAcknowledgedInstance + 1; i <= instanceN; i++) {
             InstanceState ins = instances.remove(i);
-            ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v), k));
+            ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
 
             assert ins.isDecided();
             highestAcknowledgedInstance++;

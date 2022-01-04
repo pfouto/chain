@@ -201,9 +201,9 @@ public class ChainPaxosDelayedFront extends FrontendProto {
                         pendingWrites.stream().map(Pair::getKey).collect(Collectors.toList()));
                 throw new AssertionError("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
             }
-            not.getBatch().getOps().forEach(op -> app.executeOperation(op, true));
+            not.getBatch().getOps().forEach(op -> app.executeOperation(op, true, not.getInstId()));
         } else {
-            not.getBatch().getOps().forEach(op -> app.executeOperation(op, false));
+            not.getBatch().getOps().forEach(op -> app.executeOperation(op, false, not.getInstId()));
         }
     }
 
@@ -215,7 +215,7 @@ public class ChainPaxosDelayedFront extends FrontendProto {
                         pendingReads.stream().map(Pair::getKey).collect(Collectors.toList()));
                 throw new AssertionError("Expected " + bId + ". Got " + ops);
             }
-            ops.getRight().forEach(op -> app.executeOperation(op, true));
+            ops.getRight().forEach(op -> app.executeOperation(op, true, not.getInstId()));
         });
     }
 

@@ -694,7 +694,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
         if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH)
             if (state == State.ACTIVE)
-                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
+                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch(), instance.iN));
             else
                 bufferedOps.add((AppOpBatch) instance.acceptedValue);
         else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
