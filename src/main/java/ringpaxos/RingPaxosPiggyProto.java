@@ -427,7 +427,7 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
 
         int indexOfLeader = membership.indexOf(msg.sN.getNode());
         int myIndex = membership.indexOf(self);
-        if ((indexOfLeader + QUORUM_SIZE - 1) % membership.size() == myIndex) {
+        if ((indexOfLeader + membership.size() - 1) % membership.size() == myIndex) {
             if (msg.iN == highestAcceptedInstance + 1) {
 
                 InstanceState inst;
