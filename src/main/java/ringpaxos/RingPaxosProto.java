@@ -319,8 +319,8 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<B
             InstanceState aI = instances.get(i);
             assert aI.acceptedValue != null;
             assert aI.highestAccept != null;
-            this.deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptMsg(i, currentSN.getValue(), aI.acceptedValue), (short) -1, (short) -1),
-                    self, peerChannel));
+            this.deliverMessageIn(new MessageInEvent(new BabelMessage(
+                    new AcceptMsg(i, currentSN.getValue(), aI.acceptedValue), (short) -1, (short) -1), self, peerChannel));
         }
         PaxosValue nextOp;
         while ((nextOp = waitingAppOps.poll()) != null) {
@@ -563,7 +563,8 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<B
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short) -1, (short) -1), self, peerChannel));
+            if (destination.equals(self))
+                deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short) -1, (short) -1), self, peerChannel));
             else sendMessage(msg, destination);
         }
     }

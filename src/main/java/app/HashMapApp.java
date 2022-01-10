@@ -35,6 +35,8 @@ import pt.unl.fct.di.novasys.network.NetworkManager;
 import ringpaxos.RingPaxosFront;
 import ringpaxos.RingPaxosPiggyProto;
 import ringpaxos.RingPaxosProto;
+import uringpaxos.URingPaxosFront;
+import uringpaxos.URingPaxosProto;
 
 import java.io.*;
 import java.net.Inet4Address;
@@ -114,6 +116,11 @@ public class HashMapApp implements Application {
                 for (short i = 0; i < nFrontends; i++)
                     frontendProtos.add(new RingPaxosFront(configProps, i, this));
                 consensusProto = new RingPaxosProto(configProps, consensusWorkerGroup);
+                break;
+            case "uring":
+                for (short i = 0; i < nFrontends; i++)
+                    frontendProtos.add(new URingPaxosFront(configProps, i, this));
+                consensusProto = new URingPaxosProto(configProps, consensusWorkerGroup);
                 break;
             case "ringpiggy":
                 for (short i = 0; i < nFrontends; i++)
