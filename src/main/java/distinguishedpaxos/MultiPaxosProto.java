@@ -350,7 +350,12 @@ public class MultiPaxosProto extends GenericProtocol {
         assert instance.acceptedValue != null;
         assert instance.highestAccept != null;
 
-        AcceptedMsg acceptedMsg = new AcceptedMsg(msg.iN, msg.sN, msg.value);
+        if (!instance.isDecided() && instance.acceptedValue != null &&
+                (instance.isPeerDecided() || instance.getAccepteds() >= QUORUM_SIZE)) { //We have quorum!
+            maybeDecideAndExecute(instance.iN);
+        }
+
+        AcceptedMsg acceptedMsg = new AcceptedMsg(msg.iN, msg.sN);
         membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(m -> sendOrEnqueue(acceptedMsg, m));
         uponAcceptedMsg(acceptedMsg, self, this.getProtoId(), peerChannel);
     }
@@ -362,14 +367,11 @@ public class MultiPaxosProto extends GenericProtocol {
             return;
         }
 
-        assert !instance.isDecided() || instance.acceptedValue.equals(msg.value);
-        assert instance.highestAccept == null || msg.sN.greaterThan(instance.highestAccept)
-                || instance.acceptedValue.equals(msg.value);
-
         highestAcceptedInstance = Math.max(highestAcceptedInstance, instance.iN);
 
-        int accepteds = instance.registerAccepted(msg.sN, msg.value, from);
-        if (!instance.isDecided() && (instance.isPeerDecided() || accepteds >= QUORUM_SIZE)) { //We have quorum!
+        int accepteds = instance.registerAccepted(msg.sN, from);
+        if (!instance.isDecided() && instance.acceptedValue != null
+                && (instance.isPeerDecided() || accepteds >= QUORUM_SIZE)) { //We have quorum!
             maybeDecideAndExecute(instance.iN);
         }
     }
@@ -380,7 +382,7 @@ public class MultiPaxosProto extends GenericProtocol {
 
         InstanceState instance = instances.computeIfAbsent(highestDecidedInstance + 1, InstanceState::new);
 
-        while (instance.isPeerDecided() || instance.getAccepteds() >= QUORUM_SIZE) {
+        while (instance.acceptedValue != null &&  (instance.isPeerDecided() || instance.getAccepteds() >= QUORUM_SIZE)) {
             assert !instance.isDecided();
             decideAndExecute(instance);
             instance = instances.computeIfAbsent(highestDecidedInstance + 1, InstanceState::new);
@@ -410,7 +412,8 @@ public class MultiPaxosProto extends GenericProtocol {
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short)-1, (short)-1), self, peerChannel));
+            if (destination.equals(self))
+                deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short) -1, (short) -1), self, peerChannel));
             else sendMessage(msg, destination);
         }
     }

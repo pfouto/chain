@@ -14,13 +14,11 @@ public class DecisionMsg extends ProtoMessage {
 
     public final int iN;
     public final SeqN sN;
-    public final PaxosValue value;
 
-    public DecisionMsg(int iN, SeqN sN, PaxosValue value) {
+    public DecisionMsg(int iN, SeqN sN) {
         super(MSG_CODE);
         this.iN = iN;
         this.sN = sN;
-        this.value = value;
     }
 
     @Override
@@ -28,7 +26,6 @@ public class DecisionMsg extends ProtoMessage {
         return "DecisionMsg{" +
                 "iN=" + iN +
                 ", sN=" + sN +
-                ", value=" + value +
                 '}';
     }
 
@@ -36,14 +33,12 @@ public class DecisionMsg extends ProtoMessage {
         public void serialize(DecisionMsg msg, ByteBuf out) throws IOException {
             out.writeInt(msg.iN);
             msg.sN.serialize(out);
-            PaxosValue.serializer.serialize(msg.value, out);
         }
 
         public DecisionMsg deserialize(ByteBuf in) throws IOException {
             int instanceNumber = in.readInt();
             SeqN sN = SeqN.deserialize(in);
-            PaxosValue payload = PaxosValue.serializer.deserialize(in);
-            return new DecisionMsg(instanceNumber, sN, payload);
+            return new DecisionMsg(instanceNumber, sN);
         }
     };
 }

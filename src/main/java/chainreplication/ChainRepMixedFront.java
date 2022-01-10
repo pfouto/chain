@@ -56,7 +56,8 @@ public class ChainRepMixedFront extends FrontendProto {
 
     @Override
     protected void _init(Properties props) throws HandlerRegistrationException {
-        setupPeriodicTimer(new BatchTimer(), BATCH_INTERVAL, (long) (BATCH_INTERVAL * 0.8));
+        if(BATCH_SIZE > 1)
+            setupPeriodicTimer(new BatchTimer(), BATCH_INTERVAL, (long) (BATCH_INTERVAL * 0.8));
         registerTimerHandler(BatchTimer.TIMER_ID, this::handleBatchTimer);
 
         subscribeNotification(ReplyBatchNotification.NOTIFICATION_ID, this::onReplyNotification);
@@ -81,6 +82,7 @@ public class ChainRepMixedFront extends FrontendProto {
     /* -------------------- -------- ----------------------------------------------- */
 
     protected void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel) {
+        if(logger.isDebugEnabled()) logger.debug(msg + " from " + from);
         sendRequest(new SubmitBatchRequest(msg.getBatch()), ChainRepMixedProto.PROTOCOL_ID);
     }
 

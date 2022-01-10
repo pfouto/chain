@@ -222,13 +222,17 @@ public class HashMapApp implements Application {
         if (op.getRequestType() == RequestMessage.WRITE) {
             store.put(op.getRequestKey(), op.getRequestValue());
             nWrites++;
-            if (local)
+            if (local) {
                 opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), new byte[0]));
+                if(logger.isDebugEnabled()) logger.debug("Responding");
+
+            }
         } else { //READ
             if (local) {
                 nReads++;
                 opInfo.getRight().writeAndFlush(
                         new ResponseMessage(opInfo.getLeft(), store.getOrDefault(op.getRequestKey(), new byte[0])));
+                if(logger.isDebugEnabled()) logger.debug("Responding");
             } //If remote read, nothing to do
         }
     }
@@ -304,7 +308,7 @@ public class HashMapApp implements Application {
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
             RequestMessage rMsg = (RequestMessage) msg;
-            //logger.info("Client op: " + msg);
+            if(logger.isDebugEnabled()) logger.debug("Client op: " + msg);
             if (rMsg.getRequestType() == RequestMessage.WEAK_READ) { //Exec immediately and respond
                 byte[] bytes = store.get(rMsg.getRequestKey());
                 ctx.channel().writeAndFlush(new ResponseMessage(rMsg.getcId(), bytes == null ? new byte[0] : bytes));

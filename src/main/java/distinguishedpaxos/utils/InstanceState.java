@@ -13,16 +13,11 @@ public class InstanceState {
     public final int iN;
     public SeqN highestAccept;
     public PaxosValue acceptedValue;
-
-    private boolean decided;
-
-    private Set<Host> accepteds;
-
-    private boolean peerDecided;
-
     public Map<SeqN, Set<Host>> prepareResponses;
-
     public int nodesDecided;
+    private boolean decided;
+    private Set<Host> accepteds;
+    private boolean peerDecided;
 
     public InstanceState(int iN) {
         this.iN = iN;
@@ -50,31 +45,27 @@ public class InstanceState {
 
 
     public void accept(SeqN sN, PaxosValue value) {
-        assert sN.getCounter() > -1;
-        assert value != null;
-        assert highestAccept == null || sN.greaterOrEqualsThan(highestAccept);
-        assert !isDecided() || acceptedValue.equals(value);
-        assert highestAccept == null || sN.greaterThan(highestAccept) || acceptedValue.equals(value);
 
-        if(highestAccept == null || sN.greaterThan(highestAccept)){
+        if (highestAccept == null || sN.greaterThan(highestAccept)) {
             accepteds.clear();
         }
         highestAccept = sN;
-        acceptedValue = value;
+        if (value != null)
+            acceptedValue = value;
     }
 
-    public int registerAccepted(SeqN sN, PaxosValue value, Host sender){
-        accept(sN, value);
+    public int registerAccepted(SeqN sN, Host sender) {
+        accept(sN, null);
         accepteds.add(sender);
         return accepteds.size();
     }
 
-    public void registerPeerDecision(SeqN sN, PaxosValue value){
+    public void registerPeerDecision(SeqN sN, PaxosValue value) {
         accept(sN, value);
         peerDecided = true;
     }
 
-    public int getAccepteds(){
+    public int getAccepteds() {
         return accepteds.size();
     }
 
@@ -82,7 +73,7 @@ public class InstanceState {
         return peerDecided;
     }
 
-    public  boolean isDecided() {
+    public boolean isDecided() {
         return decided;
     }
 

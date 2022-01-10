@@ -194,6 +194,7 @@ public class ChainRepMixedProto extends GenericProtocol implements IMembershipLi
     }
 
     private void uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel) {
+        if(logger.isDebugEnabled()) logger.debug(msg + " from " + from);
         if (msg.iN <= highestAcceptReceived) {
             logger.warn("Discarding duplicated msg " + msg);
             return;
@@ -222,6 +223,7 @@ public class ChainRepMixedProto extends GenericProtocol implements IMembershipLi
     }
 
     private void uponAcceptAckMsg(AcceptAckMsg msg, Host from, short sourceProto, int channel) {
+        if(logger.isDebugEnabled()) logger.debug(msg + " from " + from);
         while (!sent.isEmpty() && sent.getFirst().iN <= msg.instanceNumber) {
             AcceptMsg toExec = sent.removeFirst();
             triggerNotification(new ReplyBatchNotification(((AppOpBatch) toExec.value).getBatch()));

@@ -56,7 +56,8 @@ public class ChainPaxosMixedFront extends FrontendProto {
 
     @Override
     protected void _init(Properties props) throws HandlerRegistrationException {
-        setupPeriodicTimer(new BatchTimer(), BATCH_INTERVAL, (long) (BATCH_INTERVAL * 0.8));
+        if(BATCH_SIZE > 1)
+            setupPeriodicTimer(new BatchTimer(), BATCH_INTERVAL, (long) (BATCH_INTERVAL * 0.8));
         registerTimerHandler(BatchTimer.TIMER_ID, this::handleBatchTimer);
         lastBatchTime = System.currentTimeMillis();
     }

@@ -358,7 +358,7 @@ public class DistPaxosPiggyProto extends GenericProtocol {
         assert instance.acceptedValue != null;
         assert instance.highestAccept != null;
 
-        AcceptedMsg acceptedMsg = new AcceptedMsg(msg.iN, msg.sN, msg.value);
+        AcceptedMsg acceptedMsg = new AcceptedMsg(msg.iN, msg.sN);
         if (from.equals(self))
             uponAcceptedMsg(acceptedMsg, self, getProtoId(), peerChannel);
         else
@@ -373,13 +373,9 @@ public class DistPaxosPiggyProto extends GenericProtocol {
             return;
         }
 
-        assert !instance.isDecided() || instance.acceptedValue.equals(msg.value);
-        assert instance.highestAccept == null || msg.sN.greaterThan(instance.highestAccept)
-                || instance.acceptedValue.equals(msg.value);
-
         highestAcceptedInstance = Math.max(highestAcceptedInstance, instance.iN);
 
-        int accepteds = instance.registerAccepted(msg.sN, msg.value, from);
+        int accepteds = instance.registerAccepted(msg.sN, from);
         if (!instance.isDecided() && (instance.isPeerDecided() || accepteds >= QUORUM_SIZE)) { //We have quorum!
             maybeDecideAndExecute(instance.iN);
         }
@@ -389,13 +385,11 @@ public class DistPaxosPiggyProto extends GenericProtocol {
         InstanceState instance = instances.computeIfAbsent(msg.iN, InstanceState::new);
 
         if (instance.isDecided()) {
-            assert instance.acceptedValue.equals(msg.value);
             //logger.warn("Ignoring msg: " + msg);
             //TODO eventually forget values (when receiving decision from everyone?) (irrelevant for experiments)
         } else {
-            assert msg.sN.greaterThan(instance.highestAccept) || instance.acceptedValue.equals(msg.value);
             highestAcceptedInstance = Math.max(highestAcceptedInstance, instance.iN);
-            instance.registerPeerDecision(msg.sN, msg.value);
+            instance.registerPeerDecision(msg.sN, null);
             maybeDecideAndExecute(instance.iN);
         }
         instance.nodesDecided++;
@@ -415,7 +409,7 @@ public class DistPaxosPiggyProto extends GenericProtocol {
             assert !instance.isDecided();
             decideAndExecute(instance);
             if (instance.highestAccept.getNode().equals(self)) {
-                DecisionMsg dMsg = new DecisionMsg(instance.iN, instance.highestAccept, instance.acceptedValue);
+                DecisionMsg dMsg = new DecisionMsg(instance.iN, instance.highestAccept);
                 pendingDecs.add(dMsg);
 
                 //membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(h -> sendOrEnqueue(dMsg, h));
