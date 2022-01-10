@@ -326,6 +326,7 @@ public class MultiPaxosProto extends GenericProtocol {
 
     private void uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel) {
         InstanceState instance = instances.computeIfAbsent(msg.iN, InstanceState::new);
+        lastLeaderOp = System.currentTimeMillis();
 
         if (instance.isDecided() && msg.sN.equals(instance.highestAccept)) {
             logger.debug("Discarding decided msg");
@@ -352,7 +353,6 @@ public class MultiPaxosProto extends GenericProtocol {
         AcceptedMsg acceptedMsg = new AcceptedMsg(msg.iN, msg.sN, msg.value);
         membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(m -> sendOrEnqueue(acceptedMsg, m));
         uponAcceptedMsg(acceptedMsg, self, this.getProtoId(), peerChannel);
-        lastLeaderOp = System.currentTimeMillis();
     }
 
     private void uponAcceptedMsg(AcceptedMsg msg, Host from, short sourceProto, int channel) {
