@@ -184,7 +184,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<B
         setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
         lastLeaderOp = System.currentTimeMillis();
 
-        logger.info("RingPaxos: " + membership + " qs " + QUORUM_SIZE);
+        logger.info("RingPaxos: " + membership + " qs " + QUORUM_SIZE + " max instances: " + MAX_INSTANCES);
     }
 
     @Override
@@ -362,6 +362,7 @@ public class RingPaxosProto extends GenericProtocol implements MessageListener<B
             if (now - oldestInst.getAcceptSentTime() > ACCEPT_TIMEOUT) {
                 //acceptsSentUDP++;
                 oldestInst.setAcceptSentTime(now);
+                logger.warn("Resending old accept " + oldestInst.iN);
                 AcceptMsg acceptMsg = new AcceptMsg(oldestInst.iN, oldestInst.highestAccept, oldestInst.acceptedValue);
                 multicastNetwork.sendMulticast(acceptMsg);
             } else {

@@ -182,7 +182,7 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
         setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
         lastLeaderOp = System.currentTimeMillis();
 
-        logger.info("RingPiggyPaxos: " + membership + " qs " + QUORUM_SIZE);
+        logger.info("RingPiggyPaxos: " + membership + " qs " + QUORUM_SIZE + " max instances: " + MAX_INSTANCES);
 
     }
 
@@ -362,6 +362,7 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
             if (now - oldestInst.getAcceptSentTime() > ACCEPT_TIMEOUT) {
                 //acceptsSentUDP++;
                 oldestInst.setAcceptSentTime(now);
+                logger.warn("Resending old accept " + oldestInst.iN);
                 AcceptDecMsg acceptMsg = new AcceptDecMsg(oldestInst.iN, oldestInst.highestAccept,
                         oldestInst.acceptedValue, Collections.emptyList());
                 multicastNetwork.sendMulticast(acceptMsg);
@@ -511,9 +512,9 @@ public class RingPaxosPiggyProto extends GenericProtocol implements MessageListe
             if (!oldInst.canDecide() && now - oldInst.getDecisionReqTS() > REQ_TIMEOUT) {
                 sendMessage(new ReqDecisionMsg(toReq),
                         membership.atIndex((membership.indexOf(self) + 1) % membership.size()));
-                /*logger.warn("Requesting old decision: " + toReq + " to " +
-                        membership.atIndex((membership.indexOf(self) + 1) % membership.size()) + " "
-                        + " decided until " + highestDecidedInstance + " received " + instanceNumber);*/
+                //logger.warn("Requesting old decision: " + toReq + " to " +
+                //       membership.atIndex((membership.indexOf(self) + 1) % membership.size()) + " "
+                //       + " decided until " + highestDecidedInstance + " received " + instanceNumber);
                 oldInst.setDecisionReqTS(now);
             }
             //}
