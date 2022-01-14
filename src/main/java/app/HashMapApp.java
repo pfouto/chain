@@ -82,6 +82,11 @@ public class HashMapApp implements Application {
                     frontendProtos.add(new ChainPaxosMixedFront(configProps, i, this));
                 consensusProto = new ChainPaxosMixedProto(configProps, consensusWorkerGroup);
                 break;
+            case "chain_mixed_3":
+                for (short i = 0; i < nFrontends; i++)
+                    frontendProtos.add(new ChainPaxosMixedFront(configProps, i, this));
+                consensusProto = new ChainPaxosMixedProto(configProps, consensusWorkerGroup);
+                break;
             case "chain_delayed":
                 for (short i = 0; i < nFrontends; i++)
                     frontendProtos.add(new ChainPaxosDelayedFront(configProps, i, this));
