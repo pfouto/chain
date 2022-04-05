@@ -263,7 +263,7 @@ public class HashMapApp implements Application {
             }
             logger.info("State installed(" + nWrites + ") ");
         } catch (IOException e) {
-            logger.error(e.getMessage());
+            logger.error("Error installing state", e);
             throw new AssertionError();
         }
     }
@@ -277,13 +277,13 @@ public class HashMapApp implements Application {
             out.writeInt(store.size());
             for (Map.Entry<String, byte[]> e : store.entrySet()) {
                 out.writeUTF(e.getKey());
-                out.write(e.getValue().length);
+                out.writeInt(e.getValue().length);
                 out.write(e.getValue());
             }
-            logger.debug("State stored(" + nWrites + ")");
+            logger.info("State stored(" + nWrites + "), size: " + baos.size() );
             return baos.toByteArray();
         } catch (IOException e) {
-            logger.error(e.getMessage());
+            logger.error("Error generating state", e);
             throw new AssertionError();
         }
     }
@@ -305,7 +305,7 @@ public class HashMapApp implements Application {
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
             logger.error("Exception caught.", cause);
-            ctx.fireExceptionCaught(cause);
+            //ctx.fireExceptionCaught(cause);
         }
 
         @Override
