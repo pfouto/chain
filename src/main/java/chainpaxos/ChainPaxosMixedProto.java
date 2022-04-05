@@ -150,7 +150,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, DecidedMsg.MSG_CODE, this::uponDecidedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, JoinRequestMsg.MSG_CODE,
-                this::uponJoinRequestMsg, this::uponMessageFailed);
+                this::uponJoinRequestMsg, this::uponJoinRequestOut, this::uponMessageFailed);
         registerMessageHandler(peerChannel, JoinSuccessMsg.MSG_CODE,
                 this::uponJoinSuccessMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, MembershipOpRequestMsg.MSG_CODE,
@@ -188,6 +188,7 @@ public class ChainPaxosMixedProto extends GenericProtocol {
 
         logger.info("ChainPaxos: " + membership + " qs " + QUORUM_SIZE);
     }
+
 
     private void setupInitialState(List<Host> members, int instanceNumber) {
         membership = new Membership(members, QUORUM_SIZE);
@@ -269,6 +270,11 @@ public class ChainPaxosMixedProto extends GenericProtocol {
         } else
             logger.warn("Unexpected JoinTimer");
     }
+
+    private void uponJoinRequestOut(JoinRequestMsg msg, Host to, short destProto, int channelId) {
+        closeConnection(to);
+    }
+
 
     private void uponStateRequestMsg(StateRequestMsg msg, Host from, short sourceProto, int channel) {
         Pair<Integer, byte[]> storedState = storedSnapshots.get(from);
@@ -642,6 +648,9 @@ public class ChainPaxosMixedProto extends GenericProtocol {
 
     private void uponOutConnectionUp(OutConnectionUp event, int channel) {
         logger.debug(event);
+        if(state == State.JOINING)
+            return;
+
         if (membership.contains(event.getNode())) {
             establishedConnections.add(event.getNode());
             if (event.getNode().equals(nextOk))
