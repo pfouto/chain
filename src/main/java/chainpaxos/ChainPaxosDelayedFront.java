@@ -2,6 +2,7 @@ package chainpaxos;
 
 import app.Application;
 import chainpaxos.ipc.ExecuteReadReply;
+import chainpaxos.timers.ReconnectTimer;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionDown;
 import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionFailed;
@@ -76,6 +77,8 @@ public class ChainPaxosDelayedFront extends FrontendProto {
         final int minTimer = Math.min(LOCAL_BATCH_INTERVAL, BATCH_INTERVAL);
         setupPeriodicTimer(new BatchTimer(), minTimer, minTimer);
         registerReplyHandler(ExecuteReadReply.REPLY_ID, this::onExecuteRead);
+
+        registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
 
         lastWriteBatchTime = System.currentTimeMillis();
         lastReadBatchTime = System.currentTimeMillis();
@@ -168,9 +171,9 @@ public class ChainPaxosDelayedFront extends FrontendProto {
     protected void onOutConnectionDown(OutConnectionDown event, int channel) {
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
-            logger.warn("Lost connection to writesTo, re-connecting: " + event);
+            logger.warn("Lost connection to writesTo, re-connecting in 5: " + event);
             writesToConnected = false;
-            openConnection(writesTo, peerChannel);
+            setupTimer(new ReconnectTimer(writesTo), 5000);
         }
     }
 
@@ -178,10 +181,17 @@ public class ChainPaxosDelayedFront extends FrontendProto {
         logger.info(event);
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
-            logger.warn("Connection failed to writesTo, re-trying: " + event);
-            openConnection(writesTo, peerChannel);
+            logger.warn("Connection failed to writesTo, re-trying in 5: " + event);
+            setupTimer(new ReconnectTimer(writesTo), 5000);
         } else {
             logger.warn("Unexpected connectionFailed, ignoring: " + event);
+        }
+    }
+
+    private void onReconnectTimer(ReconnectTimer timer, long timerId) {
+        if (timer.getHost().equals(writesTo)) {
+            logger.info("Trying to reconnect to writesTo " + timer.getHost());
+            openConnection(timer.getHost());
         }
     }
 

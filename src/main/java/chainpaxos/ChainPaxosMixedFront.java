@@ -1,6 +1,7 @@
 package chainpaxos;
 
 import app.Application;
+import chainpaxos.timers.ReconnectTimer;
 import org.apache.commons.lang3.tuple.Pair;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
@@ -59,6 +60,8 @@ public class ChainPaxosMixedFront extends FrontendProto {
         if(BATCH_SIZE > 1)
             setupPeriodicTimer(new BatchTimer(), BATCH_INTERVAL, (long) (BATCH_INTERVAL * 0.8));
         registerTimerHandler(BatchTimer.TIMER_ID, this::handleBatchTimer);
+        registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
+
         lastBatchTime = System.currentTimeMillis();
     }
 
@@ -122,9 +125,9 @@ public class ChainPaxosMixedFront extends FrontendProto {
     protected void onOutConnectionDown(OutConnectionDown event, int channel) {
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
-            logger.warn("Lost connection to writesTo, re-connecting: " + event);
+            logger.warn("Lost connection to writesTo, re-connecting in 5: " + event);
             writesToConnected = false;
-            openConnection(writesTo, peerChannel);
+            setupTimer(new ReconnectTimer(writesTo), 5000);
         }
     }
 
@@ -132,12 +135,20 @@ public class ChainPaxosMixedFront extends FrontendProto {
         logger.info(event);
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
-            logger.warn("Connection failed to writesTo, re-trying: " + event);
-            openConnection(writesTo, peerChannel);
+            logger.warn("Connection failed to writesTo, re-trying in 5: " + event);
+            setupTimer(new ReconnectTimer(writesTo), 5000);
         } else {
             logger.warn("Unexpected connectionFailed, ignoring: " + event);
         }
     }
+
+    private void onReconnectTimer(ReconnectTimer timer, long timerId) {
+        if (timer.getHost().equals(writesTo)) {
+            logger.info("Trying to reconnect to writesTo " + timer.getHost());
+            openConnection(timer.getHost());
+        }
+    }
+
 
     private void sendBatchToWritesTo(PeerBatchMessage msg) {
         if (writesTo.getAddress().equals(self)) onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
