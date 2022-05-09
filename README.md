@@ -36,11 +36,7 @@ The only requirement to run ChainPaxos is having Java installed on the hosts. Th
 
 Start by cloning the repository and then copying the folder deploy/server to each host.
 
-Then, from the folder where the jar file is, run the following command in each host, replacing:
-* `<bind interface>` with the name of the interface which will be used for the replicas to communicate
-* `<server list>` a list of comma separated (without spaces) ip addresses (or names) of the hosts running the replicas. For instance: `192.168.0.1,192.168.0.2,192.168.0.3`
-* `<quorum size>` the size of the initial quorum. If running 3 replicas, this number should be 2.
-
+Then, from the folder where the jar file is, run the following command in each host:
 
     java -Dlog4j.configurationFile=log4j2.xml \
         -Djava.net.preferIPv4Stack=true \
@@ -51,6 +47,14 @@ Then, from the folder where the jar file is, run the following command in each h
         initial_membership=<server list> \
         initial_state=ACTIVE \
         quorum_size=<quorum size>
+
+Replacing:
+* `<bind interface>` with the name of the interface which will be used for the replicas to communicate
+* `<server list>` a list of comma separated (without spaces) ip addresses (or names) of the hosts running the replicas. For instance: `192.168.0.1,192.168.0.2,192.168.0.3`
+* `<quorum size>` the size of the initial quorum. If running 3 replicas, this number should be 2.
+
+
+  
 
 For instance, if the hosts have the ip addresses `192.168.0.1`, `192.168.0.2` and `192.168.0.3` in interface `eth0`, you would run the following command:
 
@@ -82,7 +86,7 @@ it awaits client connections. Changing the log level to debug in the `log4j2.xml
 All replicas should be launched in a time window lower than the configured `leader_timeout`. 
 If a replica takes too long to be launched, then the other replicas may have already removed it from their membership, causing undefined behaviour.
 
-To add new replicas to the membership, execute the command with `initial_state=JOINING`.
+To add new (or removed) replicas to the membership, execute the command with `initial_state=JOINING`.
 
 ---
 ### Testing with clients
