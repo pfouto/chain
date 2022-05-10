@@ -69,7 +69,7 @@ This script does the following:
 * Launches a new container with the YCSB client, which run for 45 seconds
   * This client in configured to launch 20 client threads, which are distributed across all replicas, executing 50% read and 50% write operations with a payload size of 100 bytes.
   * Feel free to modify these parameters in the script to see how the benchmark results change.
-* After the YCSB client terminates, the script kills the application containers, which display the number of execute read and writes before terminating.
+* After the YCSB client terminates, the script kills the application containers, which display the number of executed read and writes before terminating.
 
 The script `docker_clean.sh` can be used to clean your docker environment after you are done experimenting. 
 It kills and removes any dangling containers used by the previous script (useful if you accidentally stopped the script while the experiment was still running), removes the created network and
