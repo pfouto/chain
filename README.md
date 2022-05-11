@@ -32,22 +32,20 @@ The folder deploy/server contains all files required to execute the protocols:
 ## ChainPaxos Client
 
 A client for the key-value store application was implemented over the [YCSB](https://github.com/brianfrankcooper/YCSB) benchmarking tool. It is available [here](https://github.com/pfouto/chain-client). 
-Instructions on how to run ChainPaxos with the replicated key-value store and executing client operations follow next.
 
-## Running ChainPaxos
+## How to run ChainPaxos
 
-This section contains instructions on how to test ChainPaxos, by running the replicated key-value store on 3 replicas, 
+This section contains instructions on how to test ChainPaxos by running the replicated key-value store on 3 replicas, 
 and then using the YCSB client to execute operations over the application.
 Two options are presented:
-* Running everything on a single machine using docker - this only requires having docker installed.
-* Running each replica on a different machine, which is closer to what a production environment would look like - this
+* [Running everything on a single machine using docker](#Running-ChainPaxos-in-a-single-machine-with-docker) - this only requires having docker installed.
+* [Running each replica on a different machine](#Running-ChainPaxos-in-multiple-machines), which is closer to what a production environment would look like - this
 requires having Java installed in each machine, and that the machines be able to communicate with each other. The setup is also
 slightly more complex.
 
 ### Running ChainPaxos in a single machine with docker
 
-The instruction to test ChainPaxos with docker are very simple, all we need to do is build the docker image and then execute a provided
-script that runs the test.
+To test ChainPaxos with docker, all we need to do is build the docker image and then execute a provided script that runs the test.
 
 First, clone this repository, which includes a Dockerfile, and build the image, naming it `chain-paxos`:
 
@@ -61,17 +59,17 @@ Then do the same for the client, naming the image `chain-client`:
     cd chain-client
     docker build . -t chain-client
 
-And finally, execute the script `docker_test.sh`, which is available in the folder to where this repository was cloned.
+Finally, execute the script `docker_test.sh`, which is available in the folder to where this repository was cloned.
 
 This script does the following:
 * Creates a network named `chain-net`
 * Launches 3 docker containers named `chain1`, `chain2` and `chain3` on the created network.
-* Launches the replicated key-value store application in each replica, which some pre-defined configurations. Read [configuration page](https://github.com/pfouto/chain-client/wiki/Configuration) and [Running ChainPaxos in multiple machines](#Running-ChainPaxos-in-multiple-machines) for more details on the configurations.
+* Launches the replicated key-value store application in each replica, with some pre-defined configurations. Read [configuration page](https://github.com/pfouto/chain-client/wiki/Configuration) and [Running ChainPaxos in multiple machines](#Running-ChainPaxos-in-multiple-machines) for more details on the configurations.
 * Waits a few seconds for the replicas to connect to each other and elect a leader (you will see the leader election output on your terminal)
-* Launches a new container with the YCSB client, which run for 45 seconds
+* Launches a new container with the YCSB client, which runs for 45 seconds
   * This client in configured to launch 20 client threads, which are distributed across all replicas, executing 50% read and 50% write operations with a payload size of 100 bytes.
   * Feel free to modify these parameters in the script to see how the benchmark results change.
-* After the YCSB client terminates, the script kills the application containers, which display the number of executed read and writes before terminating.
+* After the YCSB client terminates, the script kills the application containers, which display the number of executed reads and writes before terminating.
 
 The script `docker_clean.sh` can be used to clean your docker environment after you are done experimenting. 
 It kills and removes any dangling containers used by the previous script (useful if you accidentally stopped the script while the experiment was still running), removes the created network and
