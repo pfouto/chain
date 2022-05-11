@@ -15,10 +15,10 @@ This repository contains:
   * and the version with the local read algorithm presented in the paper (ChainPaxosDelayed).
 * Java implementations of other consensus protocols, using the same codebase as ChainPaxos,
 which were used in the experiments presented in the aforementioned paper:
-    * [Chain Replication](https://www.usenix.org/legacy/events/osdi04/tech/full_papers/renesse/renesse.pdf) (package chainreplication)
-    * [Egalitarian Paxos](https://dl.acm.org/doi/abs/10.1145/2517349.2517350) (package epaxos)
-    * [Ring Paxos](https://ieeexplore.ieee.org/abstract/document/5544272) and [U-Ring Paxos](https://academic.oup.com/comjnl/article/60/6/866/3058780) (packages ringpaxos and uringpaxos)
-    * Multi-Paxos and Multi-Paxos with a distinguished learner (package distinguishedpaxos)
+    * [Chain Replication](https://www.usenix.org/legacy/events/osdi04/tech/full_papers/renesse/renesse.pdf) (package chainreplication);
+    * [Egalitarian Paxos](https://dl.acm.org/doi/abs/10.1145/2517349.2517350) (package epaxos);
+    * [Ring Paxos](https://ieeexplore.ieee.org/abstract/document/5544272) and [U-Ring Paxos](https://academic.oup.com/comjnl/article/60/6/866/3058780) (packages ringpaxos and uringpaxos);
+    * Multi-Paxos and Multi-Paxos with a distinguished learner (package distinguishedpaxos);
 * A simple replicated key-value store application, which can be used to test the protocols (package app).
 
 The folder deploy/server contains all files required to execute the protocols:
@@ -77,10 +77,11 @@ removes the previously created images. Note that some intermediate images (namel
 
 ### Running ChainPaxos in multiple machines
 
-In order to test the protocol in multiple machines, at least 3 hosts are required (hosts can be physical machines, docker containers in a swarm, or virtual machines).
-This is required since the protocol binds to the same ports in each host. The hosts should be able to communicate with each other, ideally in a private network without any firewalls or NAT between them.
+In order to test the protocol in multiple machines, at least 3 hosts are required, since the protocol binds to the same ports in each host.
+Hosts can be physical machines, docker containers in a swarm, or virtual machines,
+and should be able to communicate with each other, ideally in a private network without any firewalls or NAT between them.
 
-The only requirement to run ChainPaxos is having Java installed on the hosts. The protocol was developed and tested using OpenJDK 17, however versions 11 or 8 should also work (no guarantees).
+The only requirement to run ChainPaxos is having Java installed on the hosts. The protocol was developed and tested using OpenJDK 17, however versions 11 or 8 should also work, though we cannot guarantee that they will.
 
 Start by cloning the repository and then copying the folder deploy/server to each host.
 
@@ -98,8 +99,8 @@ Then, from the folder where the jar file is, run the following command in each h
 
 Replacing:
 * `<bind interface>` with the name of the interface which will be used for the replicas to communicate
-* `<server list>` a list of comma separated (without spaces) ip addresses (or names) of the hosts running the replicas. For instance: `192.168.0.1,192.168.0.2,192.168.0.3`
-* `<quorum size>` the size of the initial quorum. If running 3 replicas, this number should be 2.
+* `<server list>` with a list of comma separated (without spaces) ip addresses (or names) of the hosts running the replicas. For instance: `192.168.0.1,192.168.0.2,192.168.0.3`
+* `<quorum size>` with the size of the initial quorum. If running 3 replicas, this number should be 2.
 
 
   
@@ -123,7 +124,7 @@ will show the following output:
 
 `I am leader now! @ instance 0`
 
-while the other replicas will output that the support the new leader:
+while the other replicas will output that they support the new leader:
 
 `New highest instance leader: iN:0, SN{0:192.168.0.1:50300}`. 
 
