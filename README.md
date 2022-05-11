@@ -10,10 +10,12 @@ For details on the internals of the algorithm, refer to the USENIX ATC'22 paper
 ## Contents of the repository
 
 This repository contains:
-* The Java implementation of ChainPaxos (in package chainpaxos)
+* The Java implementation of ChainPaxos (in package chainpaxos), including:
+  * a version where reads are handled like writes, being propagated through the chain (ChainPaxosMixed); 
+  * and the version with the local read algorithm presented in the papaer (ChainPaxosDelayed).
 * Java implementation of other consensus protocols, using the same codebase as ChainPaxos,
-which were used in the experiments present in the aforementioned paper:
-    * [Chain Replication](https://www.usenix.org/legacy/events/osdi04/tech/full_papers/renesse/renesse.pdf) (package chainreplication). Including a version where reads are handled like writes, being propagated through the chain (ChainPaxosMixed); and then version with the local read algorithm presented in the papaer (ChainPaxosDelayed).
+which were used in the experiments presented in the aforementioned paper:
+    * [Chain Replication](https://www.usenix.org/legacy/events/osdi04/tech/full_papers/renesse/renesse.pdf) (package chainreplication)
     * [Egalitarian Paxos](https://dl.acm.org/doi/abs/10.1145/2517349.2517350) (package epaxos)
     * [Ring Paxos](https://ieeexplore.ieee.org/abstract/document/5544272) and [U-Ring Paxos](https://academic.oup.com/comjnl/article/60/6/866/3058780) (packages ringpaxos and uringpaxos)
     * Multi-Paxos and Multi-Paxos with a distinguished learner (package distinguishedpaxos)
