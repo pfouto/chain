@@ -1,7 +1,7 @@
 ChainPaxos
 ============
 
-## What is ChainPaxos
+## What is ChainPaxos?
 Implementation of the ChainPaxos consensus algorithm for high throughput replication.
 
 For details on the internals of the algorithm, refer to the USENIX ATC'22 paper 
@@ -12,8 +12,8 @@ For details on the internals of the algorithm, refer to the USENIX ATC'22 paper
 This repository contains:
 * The Java implementation of ChainPaxos (in package chainpaxos), including:
   * a version where reads are handled like writes, being propagated through the chain (ChainPaxosMixed); 
-  * and the version with the local read algorithm presented in the papaer (ChainPaxosDelayed).
-* Java implementation of other consensus protocols, using the same codebase as ChainPaxos,
+  * and the version with the local read algorithm presented in the paper (ChainPaxosDelayed).
+* Java implementations of other consensus protocols, using the same codebase as ChainPaxos,
 which were used in the experiments presented in the aforementioned paper:
     * [Chain Replication](https://www.usenix.org/legacy/events/osdi04/tech/full_papers/renesse/renesse.pdf) (package chainreplication)
     * [Egalitarian Paxos](https://dl.acm.org/doi/abs/10.1145/2517349.2517350) (package epaxos)
@@ -22,7 +22,7 @@ which were used in the experiments presented in the aforementioned paper:
 * A simple replicated key-value store application, which can be used to test the protocols (package app).
 
 The folder deploy/server contains all files required to execute the protocols:
-* `chain.jar` - a "uber" jar file with the source code of this repository plus all dependencies bundled together.
+* `chain.jar` - an "uber" jar file with the source code of this repository plus all dependencies bundled together.
   If you wish to make changes to the source code, executing "mvn package" in the root directory will build a new jar with your changes.
 * `config.properties` - the file that contains all configurations required to execute the protocols. Details on what each field does can be found [here](https://github.com/pfouto/chain/wiki/Configuration).
   Every configuration in this file can be overridden when launching the process, and not all fields are required for all protocols.
