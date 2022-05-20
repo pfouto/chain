@@ -108,6 +108,8 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
     private final Queue<AppOpBatch> bufferedOps = new LinkedList<>();
     private Map.Entry<Integer, byte[]> receivedState = null;
 
+    private long leaderTimeoutTimer;
+
     private int peerChannel;
 
     private final EventLoopGroup workerGroup;
@@ -163,6 +165,7 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
         registerMessageSerializer(peerChannel, StateTransferMsg.MSG_CODE, StateTransferMsg.serializer);
         registerMessageSerializer(peerChannel, UnaffiliatedMsg.MSG_CODE, UnaffiliatedMsg.serializer);
 
+        registerMessageHandler(peerChannel, UnaffiliatedMsg.MSG_CODE, this::uponUnaffiliatedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, DecidedMsg.MSG_CODE, this::uponDecidedMsg, this::uponMessageFailed);
@@ -210,13 +213,24 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
     private void setupInitialState(List<Host> members, int instanceNumber) {
         membership = new Membership(members, QUORUM_SIZE);
         nextOk = membership.nextLivingInChain(self);
-        seeds.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
+        members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
         joiningInstance = highestAcceptedInstance = highestAcknowledgedInstance = highestDecidedInstance =
                 instanceNumber;
-        setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
+        leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
         lastLeaderOp = System.currentTimeMillis();
     }
 
+    private void uponUnaffiliatedMsg(UnaffiliatedMsg msg, Host from, short sourceProto, int channel) {
+        if (state == State.ACTIVE && membership.contains(from)){
+            logger.error("Looks like I have unknowingly been removed from the membership, rejoining");
+            instances.clear();
+            cancelTimer(leaderTimeoutTimer);
+            membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(this::closeConnection);
+            membership = null;
+            state = State.JOINING;
+            joinTimer = setupTimer(JoinTimer.instance, 1000);
+        }
+    }
     private void uponJoinRequestMsg(JoinRequestMsg msg, Host from, short sourceProto, int channel) {
         if (state == State.ACTIVE)
             if (supportedLeader() != null)
@@ -348,6 +362,12 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
 
     private void uponPrepareMsg(PrepareMsg msg, Host from, short sourceProto, int channel) {
         logger.debug(msg + " : " + from);
+        if(!membership.contains(from)){
+            logger.warn("Received msg from unaffiliated host " + from);
+            sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
+            return;
+        }
+
         if (msg.iN > highestAcknowledgedInstance) {
 
             assert msg.iN >= currentSN.getKey();
@@ -485,6 +505,12 @@ public class ChainPaxosDelayedProto extends GenericProtocol {
     }
 
     private void uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel) {
+        if(!membership.contains(from)){
+            logger.warn("Received msg from unaffiliated host " + from);
+            sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
+            return;
+        }
+
         InstanceState instance = instances.computeIfAbsent(msg.iN, InstanceState::new);
 
         if (instance.isDecided() && msg.sN.equals(instance.highestAccept)) {
