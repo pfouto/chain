@@ -126,6 +126,10 @@ public class MultiPaxosProto extends GenericProtocol {
 
         if (state == State.ACTIVE) {
             if (!seeds.contains(self)) {
+                logger.error("Non seed starting in active state\n" +
+                        "Seeds raw: " + props.getProperty(INITIAL_MEMBERSHIP_KEY)+ "\n"+
+                        "Seeds parsed: " + seeds + "\n" +
+                        "Self: " + self);
                 logger.error("Non seed starting in active state");
                 throw new AssertionError("Non seed starting in active state");
             }
