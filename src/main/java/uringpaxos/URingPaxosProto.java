@@ -136,7 +136,10 @@ public class URingPaxosProto extends GenericProtocol {
 
         if (state == State.ACTIVE) {
             if (!seeds.contains(self)) {
-                logger.error("Non seed starting in active state");
+                logger.error("Non seed starting in active state\n" +
+                        "Seeds raw: " + props.getProperty(INITIAL_MEMBERSHIP_KEY)+ "\n"+
+                        "Seeds parsed: " + seeds + "\n" +
+                        "Self: " + self);
                 throw new AssertionError("Non seed starting in active state");
             }
             membership = new Membership(seeds);
