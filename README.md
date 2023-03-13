@@ -4,8 +4,7 @@ ChainPaxos
 ## What is ChainPaxos?
 Implementation of the ChainPaxos consensus algorithm for high throughput replication.
 
-For details on the internals of the algorithm, refer to the USENIX ATC'22 paper 
-(to be published soon) that describes ChainPaxos in detail.
+For details on the internals of the algorithm, refer to the [USENIX ATC'22 paper] (https://www.usenix.org/conference/atc22/presentation/fouto) that describes ChainPaxos in detail.
 
 ## Contents of the repository
 
